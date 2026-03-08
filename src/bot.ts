@@ -139,7 +139,7 @@ export function createBot(config: Config): Bot {
 		const status = piOk
 			? "Pi is ready"
 			: "Pi is not installed or not authenticated";
-		const cwd = await getWorkspace(ctx.chat.id);
+		const cwd = await setWorkspace(ctx.chat.id, config.workspace);
 
 		await ctx.reply(
 			`Welcome to Mini-Claw!
@@ -189,7 +189,7 @@ Send any message to chat with AI.`,
 	// /home command
 	bot.command("home", async (ctx) => {
 		try {
-			const cwd = await setWorkspace(ctx.chat.id, "~");
+			const cwd = await setWorkspace(ctx.chat.id, config.workspace);
 			await ctx.reply(`📁 ${formatPath(cwd)}`);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : "Unknown error";
@@ -203,7 +203,7 @@ Send any message to chat with AI.`,
 		if (!path) {
 			// No argument = go home
 			try {
-				const cwd = await setWorkspace(ctx.chat.id, "~");
+				const cwd = await setWorkspace(ctx.chat.id, config.workspace);
 				await ctx.reply(`📁 ${formatPath(cwd)}`);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : "Unknown error";
@@ -228,6 +228,7 @@ Send any message to chat with AI.`,
 		const release = await acquireLock(ctx.chat.id);
 		try {
 			const archived = await archiveSession(config, ctx.chat.id);
+			await setWorkspace(ctx.chat.id, config.workspace);
 			// Clear active session tracking for truly fresh start
 			await clearActiveSession(ctx.chat.id);
 			if (archived) {

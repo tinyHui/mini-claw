@@ -25,3 +25,8 @@ sessions/
 
 # Coverage
 coverage/
+
+
+# Pi related files
+.workspace/
+.sessions/
