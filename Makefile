@@ -116,6 +116,8 @@ install-service:
 	@echo "[Service]" >> ~/.config/systemd/user/mini-claw.service
 	@echo "Type=simple" >> ~/.config/systemd/user/mini-claw.service
 	@echo "WorkingDirectory=$$(pwd)" >> ~/.config/systemd/user/mini-claw.service
+	@echo "Environment=HOME=/home/$$(whoami)" >> ~/.config/systemd/user/mini-claw.service
+	@echo "Environment=PATH=/usr/local/bin:/usr/bin:/bin:$$(dirname $$(which node))" >> ~/.config/systemd/user/mini-claw.service
 	@echo "ExecStart=$$(which node) $$(pwd)/dist/index.js" >> ~/.config/systemd/user/mini-claw.service
 	@echo "Restart=on-failure" >> ~/.config/systemd/user/mini-claw.service
 	@echo "RestartSec=5" >> ~/.config/systemd/user/mini-claw.service
