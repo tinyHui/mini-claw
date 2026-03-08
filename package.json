@@ -15,8 +15,10 @@
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
+		"@grammyjs/files": "^1.2.0",
+		"@grammyjs/types": "^3.25.0",
 		"dotenv": "^16.4.7",
-		"grammy": "^1.35.0"
+		"grammy": "^1.41.1"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.39.2",

@@ -177,3 +177,10 @@ ps aux | grep pi
 ## License
 
 MIT
+
+## TODO
+
+[] Handle image
+[] Install more skills
+[] Connect with mem0 to support cross session memory
+[] Handle other types of files

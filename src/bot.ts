@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { Bot, InlineKeyboard, InputFile } from "grammy";
+import { Bot, Context, InlineKeyboard, InputFile } from "grammy";
 import type { Config } from "./config.js";
 import { detectFiles, snapshotWorkspace } from "./file-detector.js";
 import { markdownToHtml, stripMarkdown } from "./markdown.js";
@@ -21,6 +21,13 @@ import {
 	switchSession,
 } from "./sessions.js";
 import { formatPath, getWorkspace, setWorkspace } from "./workspace.js";
+import { hydrateFiles, FileFlavor } from "@grammyjs/files";
+import type { Message } from "@grammyjs/types";
+import {
+	hasAttachment,
+	downloadAttachment,
+	cleanupFile,
+} from "./file-handler.js";
 
 interface ShellResult {
 	stdout: string;
@@ -100,8 +107,12 @@ function splitMessage(text: string): string[] {
 	return chunks;
 }
 
-export function createBot(config: Config): Bot {
-	const bot = new Bot(config.telegramToken);
+type MyContext = FileFlavor<Context>;
+
+export function createBot(config: Config): Bot<MyContext> {
+	const bot = new Bot<MyContext>(config.telegramToken);
+
+	bot.api.config.use(hydrateFiles(bot.token));
 
 	// Access control middleware
 	if (config.allowedUsers.length > 0) {
@@ -372,10 +383,18 @@ Send any message to chat with AI.`,
 		);
 	});
 
-	// Handle all text messages
-	bot.on("message:text", async (ctx) => {
+	// Handle text, photo, and document messages
+	bot.on(["message:text", "message:photo", "message:document"], async (ctx) => {
 		const chatId = ctx.chat.id;
-		const text = ctx.message.text;
+		const message = ctx.message as Message;
+
+		const isAttachment = hasAttachment(message);
+		const text = isAttachment ? message.caption : message.text;
+
+		if (!text) {
+			await ctx.reply("Empty message — please include some text.");
+			return;
+		}
 
 		// Skip commands
 		if (text.startsWith("/")) {
@@ -392,7 +411,19 @@ Send any message to chat with AI.`,
 			return;
 		}
 
-		// Get current workspace for this chat
+		// Download attachment if present
+		const downloadedFiles: string[] = [];
+		if (isAttachment) {
+			try {
+				const { localPath } = await downloadAttachment(ctx);
+				downloadedFiles.push(localPath);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : "Unknown error";
+				await ctx.reply(`Failed to download file: ${msg}`);
+				return;
+			}
+		}
+
 		const workspace = await getWorkspace(chatId);
 
 		// Snapshot workspace before Pi execution
@@ -450,6 +481,7 @@ Send any message to chat with AI.`,
 				text,
 				workspace,
 				onActivity,
+				downloadedFiles.length > 0 ? downloadedFiles : undefined,
 			);
 
 			clearInterval(typingInterval);
@@ -512,6 +544,10 @@ Send any message to chat with AI.`,
 			}
 			const errorMsg = err instanceof Error ? err.message : "Unknown error";
 			await ctx.reply(`Failed to process: ${errorMsg}`);
+		} finally {
+			for (const filePath of downloadedFiles) {
+				await cleanupFile(filePath);
+			}
 		}
 	});
 

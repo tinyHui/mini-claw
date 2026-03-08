@@ -81,6 +81,7 @@ export async function runPi(
 	chatId: number,
 	prompt: string,
 	workspace: string,
+	files?: string[],
 ): Promise<RunResult> {
 	const release = await acquireLock(chatId);
 
@@ -96,6 +97,7 @@ export async function runPi(
 			"--print", // Non-interactive mode
 			"--thinking",
 			config.thinkingLevel,
+			...(files ?? []).map((f) => `@${f}`),
 			prompt,
 		];
 
@@ -150,6 +152,7 @@ export async function runPiWithStreaming(
 	prompt: string,
 	workspace: string,
 	onActivity: ActivityCallback,
+	files?: string[],
 ): Promise<RunResult> {
 	const release = await acquireLock(chatId);
 	const startTime = Date.now();
@@ -165,6 +168,7 @@ export async function runPiWithStreaming(
 			"--print",
 			"--thinking",
 			config.thinkingLevel,
+			...(files ?? []).map((f) => `@${f}`),
 			prompt,
 		];
 
