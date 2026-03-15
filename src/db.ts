@@ -42,6 +42,7 @@ export function initializeDatabase(workspaceFolder: string): DatabaseType {
 			timeStamp   TEXT    NOT NULL,
 			role        TEXT    NOT NULL,
 			content     TEXT    NOT NULL,
+			status      TEXT    NOT NULL DEFAULT 'pending',
 			PRIMARY KEY (id, sessionId),
 			FOREIGN KEY (sessionId) REFERENCES sessions(id)
 		);
