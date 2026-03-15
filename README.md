@@ -182,7 +182,9 @@ MIT
 
 - [x] Handle image
 - [x] Handle other types of files (basic)
-- [ ] Use sqlite3 + pi-mono core agent SDK to replace the interactive cli
+- [X] Use sqlite3 to store messsages
+- [ ] pi-mono core agent SDK to replace the interactive cli
 - [ ] Support scheduled jobs
-- [ ] Connect with mem0 to support cross session memory
 - [ ] Install skills to make research work
+- [ ] Connect with mem0 to support cross session memory
+- [ ] Support enriched files

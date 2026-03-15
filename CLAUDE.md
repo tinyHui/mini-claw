@@ -147,10 +147,10 @@ SESSION_TITLE_TIMEOUT_MS=10000          # Default: 10 seconds
 
 ## Bot Commands
 
-| Command    | Description                                                    |
-| ---------- | -------------------------------------------------------------- |
-| `/session` | Start a new session (resets conversation context, keeps history) |
-| `/status`  | Show chat ID, workspace, and session state                     |
+| Command    | Description                                                        |
+| ---------- | ------------------------------------------------------------------ |
+| `/session` | Start a new session (resets conversation context without history)  |
+| `/status`  | Show chat ID, workspace, and session state                         |
 
 ## Authentication Flow
 
