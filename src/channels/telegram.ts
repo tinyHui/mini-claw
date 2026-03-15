@@ -194,6 +194,21 @@ export class TelegramChannel implements Channel {
 				);
 			}
 		});
+
+		this.bot.on([
+			"message:photo",
+			"message:document",
+			"message:video",
+			"message:voice",
+			"message:audio",
+			"message:sticker",
+			"message:animation",
+			"message:video_note",
+			"message:contact",
+			"message:location",
+		], async (ctx) => {
+			await ctx.reply("This message type is not supported yet.");
+		});
 	}
 }
 
