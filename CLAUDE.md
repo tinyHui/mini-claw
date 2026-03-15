@@ -10,7 +10,7 @@ Lightweight Telegram bot for persistent AI conversations using Pi coding agent.
 
 ## Tech Stack
 
-- **Runtime**: Node.js 22+, TypeScript, pnpm
+- **Runtime**: Node.js 25+, TypeScript, pnpm
 - **AI Backend**: [@mariozechner/pi-coding-agent](https://github.com/badlogic/pi-mono)
 - **Telegram**: [grammY](https://grammy.dev/) (lightweight, TypeScript-native)
 - **Process**: Single long-running process (systemd/pm2/tmux)

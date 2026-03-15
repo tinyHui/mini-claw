@@ -2,15 +2,16 @@ import "dotenv/config";
 import { mkdir } from "node:fs/promises";
 import { createBot } from "./bot.js";
 import { loadConfig } from "./config.js";
+import { logger } from "./logger.js";
 import { checkPiAuth } from "./pi-runner.js";
 
 async function main() {
-	console.log("Mini-Claw starting...");
+	logger.info("Mini-Claw starting...");
 
 	// Load configuration
 	const config = loadConfig();
-	console.log(`Workspace: ${config.workspace}`);
-	console.log(`Session dir: ${config.sessionDir}`);
+	logger.info(`Workspace: ${config.workspace}`);
+	logger.info(`Session dir: ${config.sessionDir}`);
 
 	// Ensure directories exist
 	await mkdir(config.workspace, { recursive: true });
@@ -19,18 +20,18 @@ async function main() {
 	// Check Pi installation (fatal if not available)
 	const piOk = await checkPiAuth();
 	if (!piOk) {
-		console.error("Error: Pi is not installed or not authenticated.");
-		console.error("Run 'pi /login' to authenticate with an AI provider.");
+		logger.error("Error: Pi is not installed or not authenticated.");
+		logger.error("Run 'pi /login' to authenticate with an AI provider.");
 		process.exit(1);
 	}
-	console.log("Pi: OK");
+	logger.info("Pi: OK");
 
 	// Create and start bot
 	const bot = createBot(config);
 
 	// Graceful shutdown
 	const shutdown = () => {
-		console.log("\nShutting down...");
+		logger.info("Shutting down...");
 		bot.stop();
 		process.exit(0);
 	};
@@ -38,15 +39,15 @@ async function main() {
 	process.on("SIGINT", shutdown);
 	process.on("SIGTERM", shutdown);
 
-	console.log("Bot starting...");
+	logger.info("Bot starting...");
 	await bot.start({
 		onStart: (botInfo) => {
-			console.log(`Bot @${botInfo.username} is running!`);
+			logger.info(`Bot @${botInfo.username} is running!`);
 		},
 	});
 }
 
 main().catch((err) => {
-	console.error("Fatal error:", err);
+	logger.fatal("Fatal error:", err);
 	process.exit(1);
 });

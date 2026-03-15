@@ -20,6 +20,9 @@ importers:
       grammy:
         specifier: ^1.41.1
         version: 1.41.1
+      perfect-logger:
+        specifier: ^3.0.0
+        version: 3.0.0
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -1145,6 +1148,10 @@ packages:
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
+
+  perfect-logger@3.0.0:
+    resolution: {integrity: sha512-gm6B2zzhlxh5Bf1HCFiqRojvgPNOuJ7TOIRS5uV3ArhBYJ6/oyYTBTOzF6JkDYVe/J5YdP0elo22XtXw0JpKCg==}
+    engines: {node: '>=14.0.0'}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -2327,6 +2334,8 @@ snapshots:
   path-key@3.1.1: {}
 
   pathe@2.0.3: {}
+
+  perfect-logger@3.0.0: {}
 
   picocolors@1.1.1: {}
 
