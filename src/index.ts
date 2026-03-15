@@ -2,6 +2,7 @@ import "dotenv/config";
 import { mkdir } from "node:fs/promises";
 import { createBot } from "./bot.js";
 import { loadConfig } from "./config.js";
+import { initializeDatabase } from "./db.js";
 import { logger } from "./logger.js";
 import { checkPiAuth } from "./pi-runner.js";
 
@@ -16,6 +17,9 @@ async function main() {
 	// Ensure directories exist
 	await mkdir(config.workspace, { recursive: true });
 	await mkdir(config.sessionDir, { recursive: true });
+
+	// Initialize database
+	initializeDatabase(config.workspace);
 
 	// Check Pi installation (fatal if not available)
 	const piOk = await checkPiAuth();

@@ -180,7 +180,9 @@ MIT
 
 ## TODO
 
-[] Handle image
-[] Install more skills
-[] Connect with mem0 to support cross session memory
-[] Handle other types of files
+- [x] Handle image
+- [x] Handle other types of files (basic)
+- [ ] Use sqlite3 + pi-mono core agent SDK to replace the interactive cli
+- [ ] Support scheduled jobs
+- [ ] Connect with mem0 to support cross session memory
+- [ ] Install skills to make research work
