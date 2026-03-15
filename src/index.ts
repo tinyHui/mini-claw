@@ -50,37 +50,27 @@ async function main() {
 
 	const channel = createTelegramChannel(config);
 
-	// After sendAckMessage or updateOrSendMessage fires onMessageSent, sync DB:
-	// - status='ACK'       → insert ack placeholder row
-	// - status='processed' + platformMsgId → update ack row to final content
-	// - status='processed' + no platformMsgId → insert new assistant row
 	channel.onMessageSent(async (sessionId, platformMsgId, content, status) => {
 		updateOrInsertAssistantMessage(sessionId, content, status, platformMsgId);
 	});
 
-	// Callback-driven workflow:
-	// channel receives message
-	//   → ensureSession + save user message to DB
-	//   → sendAckMessage → persist ack row if platformMsgId returned
-	//   → runPi with streaming progress updates
-	//   → updateOrSendMessage (edits ack in place or sends new message)
-	//     → fires onMessageSent → DB update handled automatically
-	//   → mark user message processed
-	channel.onMessage(async (sessionId, platformMsgId, content) => {
-		ensureSession(sessionId);
+	channel.onMessage(async (channelId, userId, platformMsgId, content) => {
+		const session = ensureSession(userId);
+		const sessionId = session.id;
 
 		const userMsg = insertMessage({ sessionId, id: platformMsgId, role: "user", content });
-		logger.info(`Saved user message ${userMsg.id} for session ${sessionId}`);
+		logger.info(`Saved user message ${userMsg.id} for session ${sessionId} (user ${userId})`);
 
-		const ackMsgId = await channel.sendAckMessage(sessionId, "🔄 Working...");
+		const ackMsgId = await channel.sendAckMessage(channelId, sessionId, "🔄 Working...");
 
-		const workspace = await getWorkspace(parseInt(sessionId, 10));
+		const workspace = await getWorkspace(channelId);
 		let lastActivityUpdate = Date.now();
 
 		try {
 			const result = await runPiWithStreaming(
 				config,
-				parseInt(sessionId, 10),
+				channelId,
+				sessionId,
 				content,
 				workspace,
 				async (activity: ActivityUpdate) => {
@@ -88,9 +78,9 @@ async function main() {
 					const now = Date.now();
 					if (now - lastActivityUpdate < 2000) return;
 					lastActivityUpdate = now;
-					// Progress-only edit — does not trigger onMessageSent
 					try {
 						await channel.updateOrSendMessage(
+							channelId,
 							sessionId,
 							formatActivityStatus(activity),
 							ackMsgId,
@@ -106,12 +96,12 @@ async function main() {
 				? `Error: ${result.error}`
 				: result.output || "(no response)";
 
-			// Delivers final response and fires onMessageSent → DB synced automatically
-			await channel.updateOrSendMessage(sessionId, finalContent, ackMsgId, "processed");
+			await channel.updateOrSendMessage(channelId, sessionId, finalContent, ackMsgId, "processed");
 			markMessageProcessed(userMsg.id, sessionId);
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : "Unknown error";
 			await channel.updateOrSendMessage(
+				channelId,
 				sessionId,
 				`Failed to process: ${errorMsg}`,
 				ackMsgId,

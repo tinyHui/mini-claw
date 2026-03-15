@@ -54,47 +54,46 @@ function detectActivity(
 	return null;
 }
 
-// Simple lock per chat to prevent concurrent executions
-const locks = new Map<number, Promise<void>>();
+const locks = new Map<string, Promise<void>>();
 
-export async function acquireLock(chatId: number): Promise<() => void> {
-	while (locks.has(chatId)) {
-		await locks.get(chatId);
+export async function acquireLock(lockKey: string): Promise<() => void> {
+	while (locks.has(lockKey)) {
+		await locks.get(lockKey);
 	}
 	let release: (() => void) | undefined;
 	const promise = new Promise<void>((resolve) => {
 		release = resolve;
 	});
-	locks.set(chatId, promise);
+	locks.set(lockKey, promise);
 	return () => {
-		locks.delete(chatId);
+		locks.delete(lockKey);
 		release?.();
 	};
 }
 
-function getSessionPath(config: Config, chatId: number): string {
-	return join(config.sessionDir, `telegram-${chatId}.jsonl`);
+function getSessionPath(config: Config, sessionId: string): string {
+	return join(config.sessionDir, `session-${sessionId}.jsonl`);
 }
 
 export async function runPi(
 	config: Config,
-	chatId: number,
+	channelId: string,
+	sessionId: string,
 	prompt: string,
 	workspace: string,
 	files?: string[],
 ): Promise<RunResult> {
-	const release = await acquireLock(chatId);
+	const release = await acquireLock(channelId);
 
 	try {
-		// Ensure session directory exists
 		await mkdir(config.sessionDir, { recursive: true });
 
-		const sessionPath = getSessionPath(config, chatId);
+		const sessionPath = getSessionPath(config, sessionId);
 
 		const args = [
 			"--session",
 			sessionPath,
-			"--print", // Non-interactive mode
+			"--print",
 			"--thinking",
 			config.thinkingLevel,
 			...(files ?? []).map((f) => `@${f}`),
@@ -106,7 +105,6 @@ export async function runPi(
 				cwd: workspace,
 				env: {
 					...process.env,
-					// Ensure pi uses the same auth
 					PI_AGENT_DIR: join(process.env.HOME || "", ".pi", "agent"),
 				},
 				stdio: ["ignore", "pipe", "pipe"],
@@ -135,7 +133,6 @@ export async function runPi(
 				resolve({ output: "", error: `Failed to start Pi: ${err.message}` });
 			});
 
-			// Timeout
 			setTimeout(() => {
 				proc.kill("SIGTERM");
 				resolve({ output: stdout || "", error: "Timeout: Pi took too long" });
@@ -148,19 +145,20 @@ export async function runPi(
 
 export async function runPiWithStreaming(
 	config: Config,
-	chatId: number,
+	channelId: string,
+	sessionId: string,
 	prompt: string,
 	workspace: string,
 	onActivity: ActivityCallback,
 	files?: string[],
 ): Promise<RunResult> {
-	const release = await acquireLock(chatId);
+	const release = await acquireLock(channelId);
 	const startTime = Date.now();
 	let lastActivity: ActivityUpdate | null = null;
 
 	try {
 		await mkdir(config.sessionDir, { recursive: true });
-		const sessionPath = getSessionPath(config, chatId);
+		const sessionPath = getSessionPath(config, sessionId);
 
 		const args = [
 			"--session",

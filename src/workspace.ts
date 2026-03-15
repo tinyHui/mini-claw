@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 const STATE_FILE = join(homedir(), ".mini-claw", "workspaces.json");
 
 interface WorkspaceState {
-	[chatId: string]: string;
+	[channelId: string]: string;
 }
 
 let state: WorkspaceState = {};
@@ -31,11 +31,10 @@ async function saveState(): Promise<void> {
 	await writeFile(STATE_FILE, JSON.stringify(state, null, 2));
 }
 
-export async function getWorkspace(chatId: number): Promise<string> {
+export async function getWorkspace(channelId: string): Promise<string> {
 	await loadState();
-	const cwd = state[String(chatId)];
+	const cwd = state[channelId];
 	if (cwd) {
-		// Verify directory still exists
 		try {
 			const stats = await stat(cwd);
 			if (stats.isDirectory()) {
@@ -49,22 +48,19 @@ export async function getWorkspace(chatId: number): Promise<string> {
 }
 
 export async function setWorkspace(
-	chatId: number,
+	channelId: string,
 	path: string,
 ): Promise<string> {
 	await loadState();
 
-	// Resolve path (handle ~, ., .., etc.)
 	let resolved = path;
 	if (path.startsWith("~")) {
 		resolved = join(homedir(), path.slice(1));
 	} else if (!path.startsWith("/")) {
-		// Relative path - resolve from current workspace
-		const current = await getWorkspace(chatId);
+		const current = await getWorkspace(channelId);
 		resolved = resolve(current, path);
 	}
 
-	// Verify directory exists
 	try {
 		await access(resolved);
 		const stats = await stat(resolved);
@@ -75,10 +71,10 @@ export async function setWorkspace(
 		if (err instanceof Error && err.message.startsWith("Not a directory")) {
 			throw err;
 		}
-		throw new Error(`Directory not found: ${resolved}`);
+		throw new Error(`Directory not found: ${resolved}`, { cause: err });
 	}
 
-	state[String(chatId)] = resolved;
+	state[channelId] = resolved;
 	await saveState();
 	return resolved;
 }

@@ -34,7 +34,7 @@ describe("workspace", () => {
 			mockReadFile.mockRejectedValue(new Error("ENOENT"));
 
 			const { getWorkspace } = await import("./workspace.js");
-			const result = await getWorkspace(123);
+			const result = await getWorkspace("123");
 
 			expect(result).toBe("/mock/home");
 		});
@@ -44,7 +44,7 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { getWorkspace } = await import("./workspace.js");
-			const result = await getWorkspace(123);
+			const result = await getWorkspace("123");
 
 			expect(result).toBe("/stored/path");
 		});
@@ -56,7 +56,7 @@ describe("workspace", () => {
 			mockStat.mockRejectedValue(new Error("ENOENT"));
 
 			const { getWorkspace } = await import("./workspace.js");
-			const result = await getWorkspace(123);
+			const result = await getWorkspace("123");
 
 			expect(result).toBe("/mock/home");
 		});
@@ -66,7 +66,7 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => false });
 
 			const { getWorkspace } = await import("./workspace.js");
-			const result = await getWorkspace(123);
+			const result = await getWorkspace("123");
 
 			expect(result).toBe("/mock/home");
 		});
@@ -75,7 +75,7 @@ describe("workspace", () => {
 			mockReadFile.mockResolvedValue("not valid json");
 
 			const { getWorkspace } = await import("./workspace.js");
-			const result = await getWorkspace(123);
+			const result = await getWorkspace("123");
 
 			expect(result).toBe("/mock/home");
 		});
@@ -85,15 +85,15 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { getWorkspace } = await import("./workspace.js");
-			await getWorkspace(123);
-			await getWorkspace(123);
-			await getWorkspace(456);
+			await getWorkspace("123");
+			await getWorkspace("123");
+			await getWorkspace("456");
 
 			// Should only read file once
 			expect(mockReadFile).toHaveBeenCalledTimes(1);
 		});
 
-		it("should handle different chat IDs independently", async () => {
+		it("should handle different channel IDs independently", async () => {
 			mockReadFile.mockResolvedValue(
 				JSON.stringify({
 					"123": "/path/for/123",
@@ -103,8 +103,8 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { getWorkspace } = await import("./workspace.js");
-			const result123 = await getWorkspace(123);
-			const result456 = await getWorkspace(456);
+			const result123 = await getWorkspace("123");
+			const result456 = await getWorkspace("456");
 
 			expect(result123).toBe("/path/for/123");
 			expect(result456).toBe("/path/for/456");
@@ -118,7 +118,7 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { setWorkspace } = await import("./workspace.js");
-			const result = await setWorkspace(123, "~/projects");
+			const result = await setWorkspace("123", "~/projects");
 
 			expect(result).toBe("/mock/home/projects");
 		});
@@ -131,7 +131,7 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { setWorkspace } = await import("./workspace.js");
-			const result = await setWorkspace(123, "subdir");
+			const result = await setWorkspace("123", "subdir");
 
 			expect(result).toBe("/current/workspace/subdir");
 		});
@@ -142,7 +142,7 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { setWorkspace } = await import("./workspace.js");
-			const result = await setWorkspace(123, "/absolute/path");
+			const result = await setWorkspace("123", "/absolute/path");
 
 			expect(result).toBe("/absolute/path");
 		});
@@ -155,7 +155,7 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { setWorkspace } = await import("./workspace.js");
-			const result = await setWorkspace(123, "..");
+			const result = await setWorkspace("123", "..");
 
 			expect(result).toBe("/current/workspace");
 		});
@@ -166,7 +166,7 @@ describe("workspace", () => {
 
 			const { setWorkspace } = await import("./workspace.js");
 
-			await expect(setWorkspace(123, "/nonexistent")).rejects.toThrow(
+			await expect(setWorkspace("123", "/nonexistent")).rejects.toThrow(
 				"Directory not found: /nonexistent",
 			);
 		});
@@ -178,7 +178,7 @@ describe("workspace", () => {
 
 			const { setWorkspace } = await import("./workspace.js");
 
-			await expect(setWorkspace(123, "/some/file")).rejects.toThrow(
+			await expect(setWorkspace("123", "/some/file")).rejects.toThrow(
 				"Not a directory: /some/file",
 			);
 		});
@@ -189,7 +189,7 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { setWorkspace } = await import("./workspace.js");
-			await setWorkspace(123, "/new/path");
+			await setWorkspace("123", "/new/path");
 
 			expect(mockWriteFile).toHaveBeenCalledWith(
 				"/mock/home/.mini-claw/workspaces.json",
@@ -203,14 +203,14 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { setWorkspace } = await import("./workspace.js");
-			await setWorkspace(123, "/new/path");
+			await setWorkspace("123", "/new/path");
 
 			expect(mockMkdir).toHaveBeenCalledWith("/mock/home/.mini-claw", {
 				recursive: true,
 			});
 		});
 
-		it("should preserve other chat workspaces when updating", async () => {
+		it("should preserve other channel workspaces when updating", async () => {
 			mockReadFile.mockResolvedValue(
 				JSON.stringify({ "456": "/other/workspace" }),
 			);
@@ -218,7 +218,7 @@ describe("workspace", () => {
 			mockStat.mockResolvedValue({ isDirectory: () => true });
 
 			const { setWorkspace } = await import("./workspace.js");
-			await setWorkspace(123, "/new/path");
+			await setWorkspace("123", "/new/path");
 
 			const savedData = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
 			expect(savedData["456"]).toBe("/other/workspace");

@@ -4,9 +4,8 @@ import type { Config } from "../config.js";
 import { logger } from "../logger.js";
 import { markdownToHtml, stripMarkdown } from "../markdown.js";
 import { checkRateLimit } from "../rate-limiter.js";
-import { getSession, resetSession } from "../session-repository.js";
+import { ensureSession, resetSession } from "../session-repository.js";
 import { formatPath, getWorkspace } from "../workspace.js";
-import { randomUUID } from "node:crypto";
 
 const MAX_MESSAGE_LENGTH = 4096;
 
@@ -56,10 +55,11 @@ export class TelegramChannel implements Channel {
 	}
 
 	async sendAckMessage(
+		channelId: string,
 		sessionId: string,
 		content: string,
 	): Promise<string | undefined> {
-		const chatId = parseInt(sessionId, 10);
+		const chatId = parseInt(channelId, 10);
 		try {
 			const msg = await this.bot.api.sendMessage(chatId, content);
 			const ackMsgId = String(msg.message_id);
@@ -73,16 +73,16 @@ export class TelegramChannel implements Channel {
 	}
 
 	async updateOrSendMessage(
+		channelId: string,
 		sessionId: string,
 		content: string,
 		platformMsgId?: string,
 		status: DeliveryStatus = "processed",
 	): Promise<void> {
-		const chatId = parseInt(sessionId, 10);
+		const chatId = parseInt(channelId, 10);
 		let deliveredMsgId: string;
 
 		if (platformMsgId !== undefined) {
-			// Edit the existing ack message in place
 			try {
 				await this.bot.api.editMessageText(
 					chatId,
@@ -91,14 +91,12 @@ export class TelegramChannel implements Channel {
 				);
 				deliveredMsgId = platformMsgId;
 			} catch {
-				// Edit failed — fall back to sending a new message
 				logger.warn(
-					`Failed to edit message ${platformMsgId} for session ${sessionId}, sending new message`,
+					`Failed to edit message ${platformMsgId} in channel ${channelId}, sending new message`,
 				);
 				deliveredMsgId = await this.sendNewMessage(chatId, content);
 			}
 		} else {
-			// No ack message — send a new message
 			deliveredMsgId = await this.sendNewMessage(chatId, content);
 		}
 
@@ -138,11 +136,10 @@ export class TelegramChannel implements Channel {
 	}
 
 	private setupHandlers(): void {
-		// Access control middleware
 		if (this.config.allowedUsers.length > 0) {
 			this.bot.use(async (ctx, next) => {
-				const userId = ctx.from?.id;
-				if (userId && this.config.allowedUsers.includes(userId)) {
+				const uid = ctx.from?.id;
+				if (uid && this.config.allowedUsers.includes(uid)) {
 					await next();
 				} else {
 					await ctx.reply("Sorry, you are not authorized to use this bot.");
@@ -156,24 +153,22 @@ export class TelegramChannel implements Channel {
 		];
 		this.bot.api.setMyCommands(commands).catch(() => {});
 
-		// /session — initialise a fresh session, resetting the conversation context
 		this.bot.command("session", async (ctx) => {
-			resetSession(randomUUID().toString());
-			logger.info(`New session started for chat ${ctx.chat.id}`);
+			const userId = String(ctx.from!.id);
+			const session = resetSession(userId);
+			logger.info(`New session ${session.id} started for user ${userId}`);
 			await ctx.reply("New session started.");
 		});
 
-		// /status — show current session and workspace info
 		this.bot.command("status", async (ctx) => {
-			const cwd = await getWorkspace(ctx.chat.id);
-			const session = getSession(String(ctx.chat.id));
+			const userId = String(ctx.from!.id);
+			const cwd = await getWorkspace(String(ctx.chat.id));
+			const session = ensureSession(userId);
 			await ctx.reply(
-				`Status:\n- Chat ID: ${ctx.chat.id}\n- Workspace: ${formatPath(cwd)}\n- Session: ${session ? "active" : "none"}`,
+				`Status:\n- Chat ID: ${ctx.chat.id}\n- Workspace: ${formatPath(cwd)}\n- Session: ${session.id.slice(0, 8)}…`,
 			);
 		});
 
-		// Ingestion-only message handler — AI processing is done in the
-		// onMessage callback registered by the orchestration layer (index.ts).
 		this.bot.on("message:text", async (ctx) => {
 			const text = ctx.message.text;
 			if (text.startsWith("/")) return;
@@ -193,6 +188,7 @@ export class TelegramChannel implements Channel {
 			if (this.messageCallback) {
 				await this.messageCallback(
 					String(ctx.chat.id),
+					String(ctx.from!.id),
 					String(ctx.message.message_id),
 					text,
 				);

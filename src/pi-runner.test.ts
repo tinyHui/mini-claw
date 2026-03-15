@@ -54,7 +54,7 @@ describe("pi-runner", () => {
 			const mockProc = createMockProcess();
 			mockSpawn.mockReturnValue(mockProc);
 
-			const resultPromise = runPi(mockConfig, 123, "hello", "/workspace");
+			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "hello", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.stdout?.emit("data", "response");
@@ -71,7 +71,7 @@ describe("pi-runner", () => {
 			const mockProc = createMockProcess();
 			mockSpawn.mockReturnValue(mockProc);
 
-			const resultPromise = runPi(mockConfig, 123, "test prompt", "/workspace");
+			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test prompt", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.stdout?.emit("data", "response");
@@ -83,7 +83,7 @@ describe("pi-runner", () => {
 				"pi",
 				[
 					"--session",
-					"/mock/sessions/telegram-123.jsonl",
+					"/mock/sessions/session-sess-abc.jsonl",
 					"--print",
 					"--thinking",
 					"low",
@@ -101,7 +101,7 @@ describe("pi-runner", () => {
 			const mockProc = createMockProcess();
 			mockSpawn.mockReturnValue(mockProc);
 
-			const resultPromise = runPi(highConfig, 123, "test", "/workspace");
+			const resultPromise = runPi(highConfig, "ch-123", "sess-abc", "test", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.stdout?.emit("data", "response");
@@ -120,7 +120,7 @@ describe("pi-runner", () => {
 			const mockProc = createMockProcess();
 			mockSpawn.mockReturnValue(mockProc);
 
-			const resultPromise = runPi(mockConfig, 123, "test", "/workspace");
+			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.stdout?.emit("data", "Hello ");
@@ -137,7 +137,7 @@ describe("pi-runner", () => {
 			const mockProc = createMockProcess();
 			mockSpawn.mockReturnValue(mockProc);
 
-			const resultPromise = runPi(mockConfig, 123, "test", "/workspace");
+			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.stderr?.emit("data", "error message");
@@ -153,7 +153,7 @@ describe("pi-runner", () => {
 			const mockProc = createMockProcess();
 			mockSpawn.mockReturnValue(mockProc);
 
-			const resultPromise = runPi(mockConfig, 123, "test", "/workspace");
+			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.emit("close", 0);
@@ -167,7 +167,7 @@ describe("pi-runner", () => {
 			const mockProc = createMockProcess();
 			mockSpawn.mockReturnValue(mockProc);
 
-			const resultPromise = runPi(mockConfig, 123, "test", "/workspace");
+			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.emit("error", new Error("spawn ENOENT"));
@@ -182,7 +182,7 @@ describe("pi-runner", () => {
 			const mockProc = createMockProcess();
 			mockSpawn.mockReturnValue(mockProc);
 
-			const resultPromise = runPi(mockConfig, 123, "test", "/workspace");
+			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.stdout?.emit("data", "partial output");
@@ -197,7 +197,7 @@ describe("pi-runner", () => {
 			expect(result.error).toBe("Timeout: Pi took too long");
 		});
 
-		it("should serialize concurrent calls for same chatId", async () => {
+		it("should serialize concurrent calls for same channelId", async () => {
 			const mockProc1 = createMockProcess();
 			const mockProc2 = createMockProcess();
 			let callCount = 0;
@@ -206,8 +206,8 @@ describe("pi-runner", () => {
 				return callCount === 1 ? mockProc1 : mockProc2;
 			});
 
-			const result1Promise = runPi(mockConfig, 123, "first", "/workspace");
-			const result2Promise = runPi(mockConfig, 123, "second", "/workspace");
+			const result1Promise = runPi(mockConfig, "ch-123", "sess-1", "first", "/workspace");
+			const result2Promise = runPi(mockConfig, "ch-123", "sess-2", "second", "/workspace");
 
 			// First call should start immediately
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
@@ -231,7 +231,7 @@ describe("pi-runner", () => {
 			expect(result2.output).toBe("second response");
 		});
 
-		it("should allow parallel calls for different chatIds", async () => {
+		it("should allow parallel calls for different channelIds", async () => {
 			const mockProc1 = createMockProcess();
 			const mockProc2 = createMockProcess();
 			let callCount = 0;
@@ -240,8 +240,8 @@ describe("pi-runner", () => {
 				return callCount === 1 ? mockProc1 : mockProc2;
 			});
 
-			const result1Promise = runPi(mockConfig, 123, "first", "/workspace");
-			const result2Promise = runPi(mockConfig, 456, "second", "/workspace");
+			const result1Promise = runPi(mockConfig, "ch-123", "sess-1", "first", "/workspace");
+			const result2Promise = runPi(mockConfig, "ch-456", "sess-2", "second", "/workspace");
 
 			// Both should start immediately
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
@@ -269,7 +269,7 @@ describe("pi-runner", () => {
 				return callCount === 1 ? mockProc1 : mockProc2;
 			});
 
-			const result1Promise = runPi(mockConfig, 123, "first", "/workspace");
+			const result1Promise = runPi(mockConfig, "ch-123", "sess-1", "first", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
 
@@ -279,7 +279,7 @@ describe("pi-runner", () => {
 			await result1Promise;
 
 			// Second call should still work
-			const result2Promise = runPi(mockConfig, 123, "second", "/workspace");
+			const result2Promise = runPi(mockConfig, "ch-123", "sess-2", "second", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
 
@@ -297,7 +297,7 @@ describe("pi-runner", () => {
 			const originalHome = process.env.HOME;
 			process.env.HOME = "/test/home";
 
-			const resultPromise = runPi(mockConfig, 123, "test", "/workspace");
+			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.emit("close", 0);
@@ -317,11 +317,11 @@ describe("pi-runner", () => {
 			process.env.HOME = originalHome;
 		});
 
-		it("should handle negative chat IDs in session path", async () => {
+		it("should use sessionId in session file path", async () => {
 			const mockProc = createMockProcess();
 			mockSpawn.mockReturnValue(mockProc);
 
-			const resultPromise = runPi(mockConfig, -100123, "test", "/workspace");
+			const resultPromise = runPi(mockConfig, "ch-100", "my-uuid-123", "test", "/workspace");
 
 			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
 			mockProc.emit("close", 0);
@@ -332,7 +332,7 @@ describe("pi-runner", () => {
 				"pi",
 				expect.arrayContaining([
 					"--session",
-					"/mock/sessions/telegram--100123.jsonl",
+					"/mock/sessions/session-my-uuid-123.jsonl",
 				]),
 				expect.any(Object),
 			);
