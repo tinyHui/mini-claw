@@ -38,7 +38,6 @@ export function initializeDatabase(workspaceFolder: string): DatabaseType {
 		CREATE TABLE IF NOT EXISTS messages (
 			id          TEXT    NOT NULL,
 			sessionId   TEXT    NOT NULL,
-			parentId    TEXT,
 			timeStamp   TEXT    NOT NULL,
 			role        TEXT    NOT NULL,
 			content     TEXT    NOT NULL,

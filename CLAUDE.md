@@ -7,6 +7,7 @@ Lightweight Telegram bot for persistent AI conversations using Pi coding agent.
 - **Simple**: Minimal dependencies, single-purpose
 - **Persistent**: Long-running conversations with session management
 - **Subscription-friendly**: Use Claude Pro/Max or ChatGPT Plus via OAuth (no API costs)
+- **Platform-agnostic core**: The database layer, repositories, and AI processor must not reference any specific messaging platform (Telegram, Discord, etc.). Use generic terms like `sessionId`, `platformMsgId`, and `channelId` instead of platform-specific names. Only the adapter layer (e.g. `src/channels/telegram.ts`) is allowed to contain platform-specific code.
 
 ## Tech Stack
 
@@ -18,33 +19,76 @@ Lightweight Telegram bot for persistent AI conversations using Pi coding agent.
 ## Architecture
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  Telegram   │────►│  Mini-Claw  │────►│  Pi Agent   │
-│   (User)    │◄────│   (Bot)     │◄────│  (Session)  │
-└─────────────┘     └─────────────┘     └─────────────┘
-                           │
-                           ▼
-                    ~/.mini-claw/
-                    └── sessions/
-                        └── telegram-<chat_id>.jsonl
+┌──────────────────┐     ┌─────────────────┐     ┌─────────────┐
+│  Messaging       │────►│  Channel        │────►│  Pi Agent   │
+│  Platform        │◄────│  (onMessage cb) │◄────│  (Runner)   │
+│  (Telegram, …)   │     └────────┬────────┘     └─────────────┘
+└──────────────────┘              │
+                                  ▼
+                           SQLite (miniclaw.db)
+                           ├── sessions
+                           └── messages
 ```
+
+### Channel Interface (`src/channels/channel.ts`)
+
+All messaging platforms are abstracted behind the `Channel` interface. Only the concrete adapter (e.g. `src/channels/telegram.ts`) contains platform-specific code.
+
+| Method | Description |
+|---|---|
+| `onMessage(callback)` | Registers the orchestration callback invoked on every user message |
+| `onMessageSent(callback)` | Registers a callback fired after `updateOrSendMessage` completes — use this to sync the DB instead of repeating the same arguments at the call site |
+| `sendAckMessage(sessionId, content)` | Sends an immediate acknowledgement; returns `platformMsgId` or `undefined` if the platform does not support ack messages |
+| `updateOrSendMessage(sessionId, content, platformMsgId?)` | Delivers the final response: edits the ack message in place when `platformMsgId` is provided, otherwise sends a new message. Falls back to a new message if the edit fails. Fires `onMessageSent` once delivered. |
+| `start()` / `stop()` | Channel lifecycle |
+
+### Callback-Driven Workflow (`src/index.ts`)
+
+```
+channel receives message
+  → ensureSession (create DB session if absent)
+  → insertMessage (role='user', status='pending')
+  → sendAckMessage
+      → platformMsgId returned  → insertAckMessage (role='assistant', status='Ack')
+      → undefined returned      → no ack row inserted
+  → runPiWithStreaming
+      → progress: updateOrSendMessage(platformMsgId) — edits ack in place (no DB sync)
+  → updateOrSendMessage(finalContent, platformMsgId?)
+      → fires onMessageSent → updateOrInsertAssistantMessage
+          → platformMsgId present → resolveAckMessage (update ack row, status='processed')
+          → platformMsgId absent  → insertMessage (role='assistant', status='processed')
+  → markMessageProcessed (user message)
+```
+
+### Adding a New Channel
+
+1. Create `src/channels/<platform>.ts` implementing `Channel`
+2. Instantiate it in `src/index.ts` and register `onMessage` + `onMessageSent`
+3. `sendAckMessage` may return `undefined` if the platform has no ack concept — the rest of the workflow handles both cases
+4. No changes required to repositories, DB, or Pi runner
 
 ## Directory Structure
 
 ```
 mini-claw/
-├── CLAUDE.md           # This file
-├── Makefile            # Quick commands
+├── CLAUDE.md                    # This file
+├── Makefile                     # Quick commands
 ├── package.json
 ├── tsconfig.json
-├── .env.example        # Environment template
+├── .env.example                 # Environment template
 ├── src/
-│   ├── index.ts        # Entry point
-│   ├── bot.ts          # Telegram bot setup
-│   ├── pi-runner.ts    # Pi agent wrapper
-│   └── config.ts       # Configuration
+│   ├── index.ts                 # Entry point & workflow orchestration
+│   ├── channels/
+│   │   ├── channel.ts           # Channel interface (platform-agnostic)
+│   │   └── telegram.ts          # Telegram adapter (implements Channel)
+│   ├── db.ts                    # SQLite init (better-sqlite3)
+│   ├── session-repository.ts    # CRUD for sessions table
+│   ├── message-repository.ts    # CRUD for messages table
+│   ├── pi-runner.ts             # Pi agent wrapper
+│   ├── logger.ts                # perfect-logger setup
+│   └── config.ts                # Configuration
 └── scripts/
-    └── setup-pi.sh     # Pi login helper
+    └── setup-pi.sh              # Pi login helper
 ```
 
 ## Quick Start
@@ -103,19 +147,15 @@ SESSION_TITLE_TIMEOUT_MS=10000          # Default: 10 seconds
 
 ## Bot Commands
 
-| Command        | Description                       |
-| -------------- | --------------------------------- |
-| `/start`       | Welcome message                   |
-| `/help`        | Show all commands                 |
-| `/pwd`         | Show current working directory    |
-| `/cd <path>`   | Change working directory          |
-| `/home`        | Go to home directory              |
-| `/shell <cmd>` | Run shell command directly        |
-| `/session`     | List sessions with inline buttons |
-| `/new`         | Start fresh session (archive old) |
-| `/status`      | Show current session info         |
-
-Note: The bot registers these commands with Telegram, so they appear in the "/" menu.
+| Command        | Description                    |
+| -------------- | ------------------------------ |
+| `/start`       | Welcome message                |
+| `/help`        | Show all commands              |
+| `/pwd`         | Show current working directory |
+| `/cd <path>`   | Change working directory       |
+| `/home`        | Go to home directory           |
+| `/shell <cmd>` | Run shell command directly     |
+| `/status`      | Show current session info      |
 
 ## Authentication Flow
 

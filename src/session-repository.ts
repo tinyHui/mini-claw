@@ -11,7 +11,8 @@ export interface Session {
 	budget_high: number;
 }
 
-export type CreateSessionData = Omit<Session, "id"> & { id?: string };
+export type CreateSessionData = Partial<Omit<Session, "id">> &
+	Pick<Session, "model" | "thinkingLevel"> & { id?: string };
 
 export function createSession(data: CreateSessionData): Session {
 	const db = getDb();
@@ -38,4 +39,11 @@ export function getSession(sessionId: string): Session | undefined {
 	return db
 		.prepare("SELECT * FROM sessions WHERE id = ?")
 		.get(sessionId) as Session | undefined;
+}
+
+// Creates a default session for sessionId if one does not already exist.
+export function ensureSession(sessionId: string): Session {
+	const existing = getSession(sessionId);
+	if (existing) return existing;
+	return createSession({ id: sessionId, model: "default", thinkingLevel: "low" });
 }
