@@ -47,3 +47,23 @@ export function ensureSession(sessionId: string): Session {
 	if (existing) return existing;
 	return createSession({ id: sessionId, model: "default", thinkingLevel: "low" });
 }
+
+// Replaces the session row with fresh defaults, effectively starting a new
+// conversation context while keeping historical messages in the DB.
+export function resetSession(sessionId: string): Session {
+	const db = getDb();
+	const session: Session = {
+		id: sessionId,
+		model: "default",
+		thinkingLevel: "low",
+		budget_minimal: 128,
+		budget_low: 512,
+		budget_medium: 1024,
+		budget_high: 2048,
+	};
+	db.prepare(`
+		INSERT OR REPLACE INTO sessions (id, model, thinkingLevel, budget_minimal, budget_low, budget_medium, budget_high)
+		VALUES (@id, @model, @thinkingLevel, @budget_minimal, @budget_low, @budget_medium, @budget_high)
+	`).run(session);
+	return session;
+}

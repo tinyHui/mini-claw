@@ -5,7 +5,6 @@ import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./db.js";
 import { logger } from "./logger.js";
 import {
-	insertAckMessage,
 	insertMessage,
 	markMessageProcessed,
 	updateOrInsertAssistantMessage,
@@ -51,11 +50,12 @@ async function main() {
 
 	const channel = createTelegramChannel(config);
 
-	// After updateOrSendMessage delivers the final response, sync the DB:
-	// - ack existed  → update that row's content and mark it processed
-	// - no ack       → insert a new assistant message row
-	channel.onMessageSent(async (sessionId, platformMsgId, content) => {
-		updateOrInsertAssistantMessage(sessionId, content, platformMsgId);
+	// After sendAckMessage or updateOrSendMessage fires onMessageSent, sync DB:
+	// - status='ACK'       → insert ack placeholder row
+	// - status='processed' + platformMsgId → update ack row to final content
+	// - status='processed' + no platformMsgId → insert new assistant row
+	channel.onMessageSent(async (sessionId, platformMsgId, content, status) => {
+		updateOrInsertAssistantMessage(sessionId, content, status, platformMsgId);
 	});
 
 	// Callback-driven workflow:
@@ -66,16 +66,13 @@ async function main() {
 	//   → updateOrSendMessage (edits ack in place or sends new message)
 	//     → fires onMessageSent → DB update handled automatically
 	//   → mark user message processed
-	channel.onMessage(async (sessionId, content) => {
+	channel.onMessage(async (sessionId, platformMsgId, content) => {
 		ensureSession(sessionId);
 
-		const userMsg = insertMessage({ sessionId, role: "user", content });
+		const userMsg = insertMessage({ sessionId, id: platformMsgId, role: "user", content });
 		logger.info(`Saved user message ${userMsg.id} for session ${sessionId}`);
 
-		const platformMsgId = await channel.sendAckMessage(sessionId, "🔄 Working...");
-		if (platformMsgId !== undefined) {
-			insertAckMessage(platformMsgId, sessionId, "🔄 Working...");
-		}
+		const ackMsgId = await channel.sendAckMessage(sessionId, "🔄 Working...");
 
 		const workspace = await getWorkspace(parseInt(sessionId, 10));
 		let lastActivityUpdate = Date.now();
@@ -87,7 +84,7 @@ async function main() {
 				content,
 				workspace,
 				async (activity: ActivityUpdate) => {
-					if (platformMsgId === undefined) return;
+					if (ackMsgId === undefined) return;
 					const now = Date.now();
 					if (now - lastActivityUpdate < 2000) return;
 					lastActivityUpdate = now;
@@ -96,10 +93,11 @@ async function main() {
 						await channel.updateOrSendMessage(
 							sessionId,
 							formatActivityStatus(activity),
-							platformMsgId,
+							ackMsgId,
+							"ACK",
 						);
 					} catch {
-						// Ignore progress update failures
+						logger.error("Failed to send activity progress update during streaming.");
 					}
 				},
 			);
@@ -109,14 +107,15 @@ async function main() {
 				: result.output || "(no response)";
 
 			// Delivers final response and fires onMessageSent → DB synced automatically
-			await channel.updateOrSendMessage(sessionId, finalContent, platformMsgId);
+			await channel.updateOrSendMessage(sessionId, finalContent, ackMsgId, "processed");
 			markMessageProcessed(userMsg.id, sessionId);
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : "Unknown error";
 			await channel.updateOrSendMessage(
 				sessionId,
 				`Failed to process: ${errorMsg}`,
-				platformMsgId,
+				ackMsgId,
+				"processed",
 			);
 		}
 	});

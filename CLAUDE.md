@@ -49,7 +49,7 @@ channel receives message
   → ensureSession (create DB session if absent)
   → insertMessage (role='user', status='pending')
   → sendAckMessage
-      → platformMsgId returned  → insertAckMessage (role='assistant', status='Ack')
+      → platformMsgId returned  → insertAckMessage (role='assistant', status='ACK')
       → undefined returned      → no ack row inserted
   → runPiWithStreaming
       → progress: updateOrSendMessage(platformMsgId) — edits ack in place (no DB sync)
@@ -147,15 +147,10 @@ SESSION_TITLE_TIMEOUT_MS=10000          # Default: 10 seconds
 
 ## Bot Commands
 
-| Command        | Description                    |
-| -------------- | ------------------------------ |
-| `/start`       | Welcome message                |
-| `/help`        | Show all commands              |
-| `/pwd`         | Show current working directory |
-| `/cd <path>`   | Change working directory       |
-| `/home`        | Go to home directory           |
-| `/shell <cmd>` | Run shell command directly     |
-| `/status`      | Show current session info      |
+| Command    | Description                                                    |
+| ---------- | -------------------------------------------------------------- |
+| `/session` | Start a new session (resets conversation context, keeps history) |
+| `/status`  | Show chat ID, workspace, and session state                     |
 
 ## Authentication Flow
 

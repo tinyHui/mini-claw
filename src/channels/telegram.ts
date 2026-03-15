@@ -1,52 +1,12 @@
-import { spawn } from "node:child_process";
 import { Bot, Context } from "grammy";
-import type { Channel, MessageCallback, MessageSentCallback } from "./channel.js";
+import type { Channel, DeliveryStatus, MessageCallback, MessageSentCallback } from "./channel.js";
 import type { Config } from "../config.js";
 import { logger } from "../logger.js";
 import { markdownToHtml, stripMarkdown } from "../markdown.js";
 import { checkRateLimit } from "../rate-limiter.js";
-import { ensureSession, getSession } from "../session-repository.js";
-import { formatPath, getWorkspace, setWorkspace } from "../workspace.js";
-
-interface ShellResult {
-	stdout: string;
-	stderr: string;
-	code: number | null;
-}
-
-async function runShell(
-	cmd: string,
-	cwd: string,
-	timeoutMs: number,
-): Promise<ShellResult> {
-	return new Promise((resolve) => {
-		const proc = spawn("bash", ["-c", cmd], {
-			cwd,
-			env: process.env,
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-
-		let stdout = "";
-		let stderr = "";
-
-		proc.stdout.on("data", (data) => {
-			stdout += data.toString();
-		});
-		proc.stderr.on("data", (data) => {
-			stderr += data.toString();
-		});
-		proc.on("close", (code) => {
-			resolve({ stdout, stderr, code });
-		});
-		proc.on("error", (err) => {
-			resolve({ stdout: "", stderr: err.message, code: 1 });
-		});
-		setTimeout(() => {
-			proc.kill("SIGTERM");
-			resolve({ stdout, stderr: `${stderr}\n(timeout)`, code: 124 });
-		}, timeoutMs);
-	});
-}
+import { getSession, resetSession } from "../session-repository.js";
+import { formatPath, getWorkspace } from "../workspace.js";
+import { randomUUID } from "node:crypto";
 
 const MAX_MESSAGE_LENGTH = 4096;
 
@@ -102,7 +62,11 @@ export class TelegramChannel implements Channel {
 		const chatId = parseInt(sessionId, 10);
 		try {
 			const msg = await this.bot.api.sendMessage(chatId, content);
-			return String(msg.message_id);
+			const ackMsgId = String(msg.message_id);
+			if (this.messageSentCallback) {
+				await this.messageSentCallback(sessionId, ackMsgId, content, "ACK");
+			}
+			return ackMsgId;
 		} catch {
 			return undefined;
 		}
@@ -112,6 +76,7 @@ export class TelegramChannel implements Channel {
 		sessionId: string,
 		content: string,
 		platformMsgId?: string,
+		status: DeliveryStatus = "processed",
 	): Promise<void> {
 		const chatId = parseInt(sessionId, 10);
 		let deliveredMsgId: string;
@@ -130,16 +95,15 @@ export class TelegramChannel implements Channel {
 				logger.warn(
 					`Failed to edit message ${platformMsgId} for session ${sessionId}, sending new message`,
 				);
-				const msg = await this.sendNewMessage(chatId, content);
-				deliveredMsgId = msg;
+				deliveredMsgId = await this.sendNewMessage(chatId, content);
 			}
 		} else {
 			// No ack message — send a new message
 			deliveredMsgId = await this.sendNewMessage(chatId, content);
 		}
 
-		if (this.messageSentCallback) {
-			await this.messageSentCallback(sessionId, deliveredMsgId, content);
+		if (status === "processed" && this.messageSentCallback) {
+			await this.messageSentCallback(sessionId, deliveredMsgId, content, "processed");
 		}
 	}
 
@@ -154,10 +118,7 @@ export class TelegramChannel implements Channel {
 				});
 				firstMsgId ??= String(msg.message_id);
 			} catch {
-				const msg = await this.bot.api.sendMessage(
-					chatId,
-					stripMarkdown(chunk),
-				);
+				const msg = await this.bot.api.sendMessage(chatId, stripMarkdown(chunk));
 				firstMsgId ??= String(msg.message_id);
 			}
 		}
@@ -190,91 +151,25 @@ export class TelegramChannel implements Channel {
 		}
 
 		const commands = [
-			{ command: "start", description: "Welcome & quick start" },
-			{ command: "help", description: "Show all commands" },
-			{ command: "pwd", description: "Show current directory" },
-			{ command: "cd", description: "Change directory" },
-			{ command: "home", description: "Go to home directory" },
-			{ command: "shell", description: "Run shell command" },
-			{ command: "status", description: "Show bot status" },
+			{ command: "session", description: "Start a new session" },
+			{ command: "status", description: "Show current session info" },
 		];
 		this.bot.api.setMyCommands(commands).catch(() => {});
 
-		this.bot.command("start", async (ctx) => {
-			const cwd = await setWorkspace(ctx.chat.id, this.config.workspace);
-			ensureSession(String(ctx.chat.id));
-			await ctx.reply(
-				`Welcome to Mini-Claw!\nWorking directory: ${formatPath(cwd)}\n\nType /help for all commands.\nSend any message to start a conversation.`,
-			);
+		// /session — initialise a fresh session, resetting the conversation context
+		this.bot.command("session", async (ctx) => {
+			resetSession(randomUUID().toString());
+			logger.info(`New session started for chat ${ctx.chat.id}`);
+			await ctx.reply("New session started.");
 		});
 
-		this.bot.command("help", async (ctx) => {
-			await ctx.reply(
-				`Mini-Claw Commands\n\nNavigation:\n/pwd - Current directory\n/cd <path> - Change directory\n/home - Go to home directory\n\nExecution:\n/shell <cmd> - Run shell command\n\nInfo:\n/status - Bot status\n/help - This message\n\nTips:\n- Any text → AI conversation\n- /shell runs instantly, no AI\n- /cd supports ~, .., relative paths`,
-			);
-		});
-
-		this.bot.command("pwd", async (ctx) => {
-			const cwd = await getWorkspace(ctx.chat.id);
-			await ctx.reply(formatPath(cwd));
-		});
-
-		this.bot.command("home", async (ctx) => {
-			try {
-				const cwd = await setWorkspace(ctx.chat.id, this.config.workspace);
-				await ctx.reply(formatPath(cwd));
-			} catch (err) {
-				await ctx.reply(
-					`Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-				);
-			}
-		});
-
-		this.bot.command("cd", async (ctx) => {
-			const path = ctx.match?.trim();
-			const target = path || this.config.workspace;
-			try {
-				const cwd = await setWorkspace(ctx.chat.id, target);
-				await ctx.reply(formatPath(cwd));
-			} catch (err) {
-				await ctx.reply(
-					`Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-				);
-			}
-		});
-
+		// /status — show current session and workspace info
 		this.bot.command("status", async (ctx) => {
 			const cwd = await getWorkspace(ctx.chat.id);
 			const session = getSession(String(ctx.chat.id));
 			await ctx.reply(
 				`Status:\n- Chat ID: ${ctx.chat.id}\n- Workspace: ${formatPath(cwd)}\n- Session: ${session ? "active" : "none"}`,
 			);
-		});
-
-		this.bot.command("shell", async (ctx) => {
-			const cmd = ctx.match?.trim();
-			if (!cmd) {
-				await ctx.reply("Usage: /shell <command>\nExample: /shell ls -la");
-				return;
-			}
-			const cwd = await getWorkspace(ctx.chat.id);
-			await ctx.replyWithChatAction("typing");
-			try {
-				const result = await runShell(cmd, cwd, this.config.shellTimeoutMs);
-				let output = "";
-				if (result.stdout) output += result.stdout;
-				if (result.stderr)
-					output += `${output ? "\n" : ""}stderr: ${result.stderr}`;
-				if (!output) output = "(no output)";
-				if (result.code !== 0) output += `\n\n[exit code: ${result.code}]`;
-				for (const chunk of splitMessage(output.trim())) {
-					await ctx.reply(chunk);
-				}
-			} catch (err) {
-				await ctx.reply(
-					`Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-				);
-			}
 		});
 
 		// Ingestion-only message handler — AI processing is done in the
@@ -296,7 +191,11 @@ export class TelegramChannel implements Channel {
 			}
 
 			if (this.messageCallback) {
-				await this.messageCallback(String(ctx.chat.id), text);
+				await this.messageCallback(
+					String(ctx.chat.id),
+					String(ctx.message.message_id),
+					text,
+				);
 			}
 		});
 	}

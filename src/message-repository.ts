@@ -3,13 +3,13 @@ import { getDb } from "./db.js";
 
 // 'pending'   – user message waiting to be picked up by the AI processor
 // 'processed' – user message that has been answered
-// 'Ack'       – assistant placeholder row inserted immediately after a user
+// 'ACK'       – assistant placeholder row inserted immediately after a user
 //               message is received. Its `id` is the platform's message ID
 //               (e.g. the Telegram message ID, stored as a string) so the
 //               processor can later edit that specific message in place once
 //               the real AI response is ready. The `sessionId` doubles as the
 //               platform channel/chat identifier.
-export type MessageStatus = "pending" | "processed" | "Ack";
+export type MessageStatus = "pending" | "processed" | "ACK";
 export type MessageRole = "user" | "assistant" | "system";
 
 export interface Message {
@@ -46,49 +46,29 @@ export function insertMessage(data: InsertMessageData): Message {
 	return message;
 }
 
-// Insert the platform acknowledgement message as an assistant row.
-// platformMsgId must be the platform's own message ID so the processor can
-// later edit that specific message via the platform's API.
-export function insertAckMessage(
-	platformMsgId: string,
-	sessionId: string,
-	content: string,
-): Message {
-	return insertMessage({
-		id: platformMsgId,
-		sessionId,
-		role: "assistant",
-		status: "Ack",
-		content,
-	});
-}
-
-// Update the ack row's content and promote its status to 'processed' once the
-// real AI response has been produced. The processor calls this after editing
-// the platform message in place.
-export function resolveAckMessage(
-	platformMsgId: string,
-	sessionId: string,
-	finalContent: string,
-): void {
-	const db = getDb();
-	db.prepare(
-		"UPDATE messages SET content = ?, status = 'processed' WHERE id = ? AND sessionId = ?",
-	).run(finalContent, platformMsgId, sessionId);
-}
-
-// Mirrors the updateOrSendMessage channel logic in the database layer:
-// - If platformMsgId is provided (ack existed), update that row's content and
-//   mark it processed.
-// - If platformMsgId is undefined (no ack was sent), insert a new assistant
-//   message row with status 'processed'.
+// Unified assistant message persistence:
+// - status='ACK', platformMsgId provided → insert a new ack placeholder row
+// - status='processed', platformMsgId provided → update that ack row's content and mark processed
+// - status='processed', platformMsgId undefined → insert a new assistant row marked processed
 export function updateOrInsertAssistantMessage(
 	sessionId: string,
 	content: string,
+	status: MessageStatus,
 	platformMsgId?: string,
 ): void {
-	if (platformMsgId !== undefined) {
-		resolveAckMessage(platformMsgId, sessionId, content);
+	const db = getDb();
+	if (status === "ACK" && platformMsgId !== undefined) {
+		insertMessage({
+			id: platformMsgId,
+			sessionId,
+			role: "assistant",
+			status: "ACK",
+			content,
+		});
+	} else if (status === "processed" && platformMsgId !== undefined) {
+		db.prepare(
+			"UPDATE messages SET content = ?, status = 'processed' WHERE id = ? AND sessionId = ?",
+		).run(content, platformMsgId, sessionId);
 	} else {
 		insertMessage({
 			sessionId,
