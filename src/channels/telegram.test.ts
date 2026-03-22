@@ -57,16 +57,15 @@ vi.mock("../logger.js", () => ({
 	withLogContext: vi.fn((_ctx: unknown, fn: () => unknown) => fn()),
 }));
 
-vi.mock("../markdown.js", () => ({
-	markdownToHtml: (text: string) => `<html>${text}</html>`,
-	stripMarkdown: (text: string) => text.replace(/[*_~`]/g, ""),
+vi.mock("telegramify-markdown", () => ({
+	default: (text: string) => `mdv2:${text}`,
 }));
 
 vi.mock("../rate-limiter.js", () => ({ checkRateLimit: vi.fn() }));
 vi.mock("../session-repository.js", () => ({ ensureSession: vi.fn(), resetSession: vi.fn() }));
 vi.mock("../workspace.js", () => ({ getWorkspace: vi.fn(), formatPath: vi.fn((p: string) => p) }));
 
-import { TelegramChannel } from "./telegram.js";
+import { TelegramChannel, toTelegramMarkdown } from "./telegram.js";
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
 	return {
@@ -136,13 +135,13 @@ describe("TelegramChannel", () => {
 	});
 
 	describe("updateOrSendMessage — edit path", () => {
-		it("edits the existing message with HTML formatting", async () => {
+		it("edits the existing message with MarkdownV2 formatting", async () => {
 			mockEditMessageText.mockResolvedValue(true);
 
 			await channel.updateOrSendMessage("123", "s1", "Hello **world**", "42", "processed");
 
 			expect(mockEditMessageText).toHaveBeenCalledWith(
-				123, 42, "<html>Hello **world**</html>", { parse_mode: "HTML" },
+				123, 42, "mdv2:Hello **world**", { parse_mode: "MarkdownV2" },
 			);
 		});
 
@@ -163,7 +162,7 @@ describe("TelegramChannel", () => {
 			expect(mockDeleteMessage).not.toHaveBeenCalled();
 		});
 
-		it("falls back to plain-text edit when HTML edit fails", async () => {
+		it("falls back to plain-text edit when MarkdownV2 edit fails", async () => {
 			mockEditMessageText
 				.mockRejectedValueOnce(apiError("can't parse entities"))
 				.mockResolvedValueOnce(true);
@@ -172,7 +171,7 @@ describe("TelegramChannel", () => {
 
 			expect(mockEditMessageText).toHaveBeenCalledTimes(2);
 			expect(mockEditMessageText).toHaveBeenNthCalledWith(
-				2, 123, 42, "Hello world",
+				2, 123, 42, "Hello **world**",
 			);
 		});
 
@@ -243,5 +242,22 @@ describe("TelegramChannel", () => {
 
 			expect(sentCallback).not.toHaveBeenCalled();
 		});
+	});
+});
+
+describe("toTelegramMarkdown", () => {
+	it("delegates to telegramify-markdown with escape strategy", () => {
+		const result = toTelegramMarkdown("Hello **world**");
+		expect(result).toBe("mdv2:Hello **world**");
+	});
+
+	it("passes through plain text", () => {
+		const result = toTelegramMarkdown("simple text");
+		expect(result).toBe("mdv2:simple text");
+	});
+
+	it("handles code blocks", () => {
+		const result = toTelegramMarkdown("```typescript\nconst x = 1;\n```");
+		expect(result).toContain("const x = 1;");
 	});
 });

@@ -1,11 +1,15 @@
 import { Bot, Context, GrammyError } from "grammy";
+import telegramifyMarkdown from "telegramify-markdown";
 import type { Channel, DeliveryStatus, MessageCallback, MessageSentCallback } from "./channel.js";
 import type { Config } from "../config.js";
 import { logger, withLogContext } from "../logger.js";
-import { markdownToHtml, stripMarkdown } from "../markdown.js";
 import { checkRateLimit } from "../rate-limiter.js";
 import { ensureSession, resetSession } from "../session-repository.js";
 import { formatPath, getWorkspace } from "../workspace.js";
+
+export function toTelegramMarkdown(text: string): string {
+	return telegramifyMarkdown(text, "escape");
+}
 
 const MAX_MESSAGE_LENGTH = 4096;
 
@@ -104,18 +108,18 @@ export class TelegramChannel implements Channel {
 		}
 
 		try {
-			const html = markdownToHtml(content);
-			await this.bot.api.editMessageText(chatId, messageId, html, { parse_mode: "HTML" });
+			const mdv2 = toTelegramMarkdown(content);
+			await this.bot.api.editMessageText(chatId, messageId, mdv2, { parse_mode: "MarkdownV2" });
 			return;
 		} catch (err) {
 			if (this.isMessageNotModified(err)) return;
-			logger.debug("HTML edit failed, trying plain text", {
+			logger.debug("MarkdownV2 edit failed, trying plain text", {
 				error: err instanceof GrammyError ? err.description : String(err),
 			});
 		}
 
 		try {
-			await this.bot.api.editMessageText(chatId, messageId, stripMarkdown(content));
+			await this.bot.api.editMessageText(chatId, messageId, content);
 			return;
 		} catch (err) {
 			if (this.isMessageNotModified(err)) return;
@@ -147,13 +151,13 @@ export class TelegramChannel implements Channel {
 		let firstMsgId: string | undefined;
 		for (const chunk of chunks) {
 			try {
-				const html = markdownToHtml(chunk);
-				const msg = await this.bot.api.sendMessage(chatId, html, {
-					parse_mode: "HTML",
+				const mdv2 = toTelegramMarkdown(chunk);
+				const msg = await this.bot.api.sendMessage(chatId, mdv2, {
+					parse_mode: "MarkdownV2",
 				});
 				firstMsgId ??= String(msg.message_id);
 			} catch {
-				const msg = await this.bot.api.sendMessage(chatId, stripMarkdown(chunk));
+				const msg = await this.bot.api.sendMessage(chatId, chunk);
 				firstMsgId ??= String(msg.message_id);
 			}
 		}
