@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { createTelegramChannel } from "./channels/telegram.js";
 import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./db.js";
+import { ensureSandboxInitialized, resetSandbox } from "./extensions/sandbox/index.js";
 import { initializeLogger, logger, withLogContext } from "./logger.js";
 import {
 	insertMessage,
@@ -53,6 +54,13 @@ async function main() {
 			process.exit(1);
 		}
 		logger.info("Pi: OK");
+
+		const sandboxOk = await ensureSandboxInitialized();
+		if (sandboxOk) {
+			logger.info("Sandbox: OK");
+		} else {
+			logger.info("Sandbox: disabled (unsupported platform or init failed)");
+		}
 
 		const channel = createTelegramChannel(config);
 
@@ -119,6 +127,7 @@ async function main() {
 						const result = await runPiWithStreaming(
 							config,
 							channelId,
+							userId,
 							sessionId,
 							content,
 							workspace,
@@ -173,9 +182,10 @@ async function main() {
 	});
 
 		const shutdown = () => {
-			void withLogContext({ operation: "shutdown" }, () => {
+			void withLogContext({ operation: "shutdown" }, async () => {
 				logger.info("Shutting down...");
 				channel.stop();
+				await resetSandbox();
 				process.exit(0);
 			});
 		};

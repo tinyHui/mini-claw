@@ -21,6 +21,26 @@ vi.mock("./pi-utils.js", () => ({
 	readSoulPromptFile: (...args: unknown[]) => mockReadSoulPromptFile(...args),
 }));
 
+vi.mock("./extensions/sandbox/index.js", () => ({
+	isSandboxReady: vi.fn(() => false),
+	createSandboxExtensionFactory: vi.fn(() => vi.fn()),
+}));
+
+vi.mock("./logger.js", () => ({
+	logger: {
+		debug: vi.fn(),
+		info: vi.fn(),
+		error: vi.fn(),
+	},
+}));
+
+const mockSetSessionFile = vi.fn();
+const mockResolveSessionHistoryPath = vi.fn();
+
+vi.mock("./session-history-path.js", () => ({
+	resolveSessionHistoryPath: (...args: unknown[]) => mockResolveSessionHistoryPath(...args),
+}));
+
 vi.mock("@mariozechner/pi-coding-agent", () => ({
 	AuthStorage: { create: vi.fn(() => ({})) },
 	ModelRegistry: class {
@@ -30,9 +50,9 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
 		reload = vi.fn().mockResolvedValue(undefined);
 	},
 	SessionManager: {
-		open: vi.fn(() => ({})),
-		create: vi.fn(() => ({ sessionFile: "/tmp/created.jsonl" })),
-		continueRecent: vi.fn(() => ({})),
+		create: vi.fn(() => ({
+			setSessionFile: mockSetSessionFile,
+		})),
 	},
 	createAgentSession: (...args: unknown[]) => mockCreateAgentSession(...args),
 }));
@@ -42,6 +62,7 @@ describe("pi-runner", () => {
 		telegramToken: "token",
 		workspace: "/workspace",
 		sessionDir: "/sessions",
+		logLevel: "info",
 		thinkingLevel: "low",
 		allowedUsers: [],
 		rateLimitCooldownMs: 5000,
@@ -57,6 +78,9 @@ describe("pi-runner", () => {
 		listeners.length = 0;
 		mockMkdir.mockResolvedValue(undefined);
 		mockReadSoulPromptFile.mockResolvedValue("");
+		mockResolveSessionHistoryPath.mockResolvedValue(
+			"/sessions/20260322T120000_1_bf84f08c.jsonl",
+		);
 		mockGetAvailable.mockResolvedValue([{ provider: "anthropic", id: "x" }]);
 		mockCreateAgentSession.mockResolvedValue({
 			session: {
@@ -105,6 +129,7 @@ describe("pi-runner", () => {
 		const result = await runPiWithStreaming(
 			config,
 			"ch-1",
+			"user-1",
 			"sess-1",
 			"hi",
 			"/workspace",
@@ -125,8 +150,8 @@ describe("pi-runner", () => {
 		);
 		mockFollowUp.mockResolvedValue(undefined);
 
-		const first = runPiWithStreaming(config, "ch-1", "sess-1", "first", "/workspace", () => {});
-		const second = runPiWithStreaming(config, "ch-1", "sess-1", "second", "/workspace", () => {});
+		const first = runPiWithStreaming(config, "ch-1", "user-1", "sess-1", "first", "/workspace", () => {});
+		const second = runPiWithStreaming(config, "ch-1", "user-1", "sess-1", "second", "/workspace", () => {});
 
 		await vi.waitFor(() => {
 			expect(mockFollowUp).toHaveBeenCalledWith("second");
@@ -175,6 +200,7 @@ describe("pi-runner", () => {
 		const result = await runPiWithStreaming(
 			config,
 			"ch-1",
+			"user-1",
 			"sess-1",
 			"list files",
 			"/workspace",
@@ -207,6 +233,7 @@ describe("pi-runner", () => {
 		const result = await runPiWithStreaming(
 			config,
 			"ch-1",
+			"user-1",
 			"sess-1",
 			"list files",
 			"/workspace",
@@ -226,6 +253,7 @@ describe("pi-runner", () => {
 		const result = await runPiWithStreaming(
 			config,
 			"ch-1",
+			"user-1",
 			"sess-1",
 			"hi",
 			"/workspace",
