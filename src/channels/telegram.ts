@@ -1,7 +1,7 @@
 import { Bot, Context } from "grammy";
 import type { Channel, DeliveryStatus, MessageCallback, MessageSentCallback } from "./channel.js";
 import type { Config } from "../config.js";
-import { logger } from "../logger.js";
+import { logger, withLogContext } from "../logger.js";
 import { markdownToHtml, stripMarkdown } from "../markdown.js";
 import { checkRateLimit } from "../rate-limiter.js";
 import { ensureSession, resetSession } from "../session-repository.js";
@@ -91,8 +91,14 @@ export class TelegramChannel implements Channel {
 				);
 				deliveredMsgId = platformMsgId;
 			} catch {
-				logger.warn(
-					`Failed to edit message ${platformMsgId} in channel ${channelId}, sending new message`,
+				withLogContext(
+					{
+						operation: "edit_message_fallback",
+						channelId,
+						sessionId,
+						platformMsgId,
+					},
+					() => logger.warn("Failed to edit message, sending a new message instead"),
 				);
 				deliveredMsgId = await this.sendNewMessage(chatId, content);
 			}
@@ -126,7 +132,13 @@ export class TelegramChannel implements Channel {
 	async start(): Promise<void> {
 		await this.bot.start({
 			onStart: (botInfo) => {
-				logger.info(`Bot @${botInfo.username} is running!`);
+				void withLogContext(
+					{
+						operation: "channel_start",
+						channelId: "telegram",
+					},
+					() => logger.info(`Bot @${botInfo.username} is running!`),
+				);
 			},
 		});
 	}
@@ -156,7 +168,17 @@ export class TelegramChannel implements Channel {
 		this.bot.command("session", async (ctx) => {
 			const userId = String(ctx.from!.id);
 			const session = resetSession(userId);
-			logger.info(`New session ${session.id} started for user ${userId}`);
+			await withLogContext(
+				{
+					operation: "session_reset",
+					userId,
+					channelId: String(ctx.chat.id),
+					sessionId: session.id,
+				},
+				() => {
+					logger.info("Started a new session");
+				},
+			);
 			await ctx.reply("New session started.");
 		});
 

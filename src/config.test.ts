@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Must mock before importing
+vi.mock("dotenv/config", () => ({}));
+
 vi.mock("node:os", () => ({
 	homedir: vi.fn(() => "/mock/home"),
 }));
@@ -179,6 +180,7 @@ describe("config", () => {
 			process.env.MINI_CLAW_SESSION_DIR = "/sessions";
 			process.env.PI_THINKING_LEVEL = "high";
 			process.env.ALLOWED_USERS = "123,456";
+			process.env.LOG_LEVEL = "debug";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
 
@@ -186,6 +188,7 @@ describe("config", () => {
 				telegramToken: "test-token",
 				workspace: "/workspace",
 				sessionDir: "/sessions",
+				logLevel: "debug",
 				thinkingLevel: "high",
 				allowedUsers: [123, 456],
 				rateLimitCooldownMs: 5000,
@@ -193,6 +196,42 @@ describe("config", () => {
 				shellTimeoutMs: 60000,
 				sessionTitleTimeoutMs: 10000,
 			});
+		});
+
+		it("should default logLevel to 'info' when LOG_LEVEL is not set", async () => {
+			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			delete process.env.LOG_LEVEL;
+			const { loadConfig } = await import("./config.js");
+			const config = loadConfig();
+			expect(config.logLevel).toBe("info");
+		});
+
+		it("should trim LOG_LEVEL", async () => {
+			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.LOG_LEVEL = "  debug  ";
+			const { loadConfig } = await import("./config.js");
+			const config = loadConfig();
+			expect(config.logLevel).toBe("debug");
+		});
+
+		it("should return cached config on subsequent calls", async () => {
+			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			const { loadConfig } = await import("./config.js");
+			const first = loadConfig();
+			process.env.TELEGRAM_BOT_TOKEN = "changed-token";
+			const second = loadConfig();
+			expect(first).toBe(second);
+		});
+
+		it("should return fresh config after resetConfigCache", async () => {
+			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			const { loadConfig, resetConfigCache } = await import("./config.js");
+			const first = loadConfig();
+			resetConfigCache();
+			process.env.TELEGRAM_BOT_TOKEN = "new-token";
+			const second = loadConfig();
+			expect(second.telegramToken).toBe("new-token");
+			expect(first).not.toBe(second);
 		});
 
 		it("should use default rate limit cooldown of 5000ms", async () => {

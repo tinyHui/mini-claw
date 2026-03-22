@@ -1,0 +1,32 @@
+---
+description: Use verbose debug logs, clear info logs, and context-enriched logging
+alwaysApply: true
+---
+
+# Logging Clarity Rule
+
+Use logs to make behavior traceable during development and operations.
+
+## Requirements
+
+- Use verbose `debug` logs for detailed execution flow and diagnostic context.
+- Add `info` logs at important lifecycle and business milestones.
+- Make logs context-enriched by default: attach relevant metadata (for example: `sessionId`, `channelId`, `operation`, `durationMs`, `status`) to every meaningful log event.
+- Include structured context in logs (for example: `sessionId`, `channelId`, `operation`, `durationMs`).
+- Keep log messages action-oriented and specific (what happened, where, and outcome).
+- Avoid logging secrets, tokens, credentials, or full sensitive payloads.
+
+## Where To Add Info Logs
+
+- Process start/stop and major initialization steps.
+- Incoming request/message handling boundaries.
+- External integrations (before/after important calls, including failures).
+- State transitions (queued -> running -> completed/failed).
+- Final outcome summaries for long-running operations.
+
+## Example
+
+```typescript
+logger.debug("Running Pi step", { sessionId, operation: "stream_chunk", chunkSize });
+logger.info("Session response completed", { sessionId, durationMs, status: "processed" });
+```

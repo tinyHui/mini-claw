@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import Database, { type Database as DatabaseType } from "better-sqlite3";
-import { logger } from "./logger.js";
+import { logger, withLogContext } from "./logger.js";
 
 let db: DatabaseType | null = null;
 
@@ -52,28 +52,30 @@ function migrateIfNeeded(database: DatabaseType): void {
 }
 
 export function initializeDatabase(workspaceFolder: string): DatabaseType {
-	const dbPath = join(workspaceFolder, "miniclaw.db");
+	return withLogContext({ operation: "database_init" }, () => {
+		const dbPath = join(workspaceFolder, "miniclaw.db");
 
-	if (existsSync(dbPath)) {
-		logger.info(`Database already exists at ${dbPath}`);
+		if (existsSync(dbPath)) {
+			logger.info(`Database already exists at ${dbPath}`);
+			db = new Database(dbPath);
+			db.pragma("journal_mode = WAL");
+			db.pragma("foreign_keys = ON");
+			migrateIfNeeded(db);
+			return db;
+		}
+
+		logger.warn(`Database not found at ${dbPath}, creating and initializing`);
+
+		mkdirSync(workspaceFolder, { recursive: true });
+
 		db = new Database(dbPath);
 		db.pragma("journal_mode = WAL");
 		db.pragma("foreign_keys = ON");
-		migrateIfNeeded(db);
+		db.exec(CURRENT_SCHEMA);
+
+		logger.info("Database initialized");
 		return db;
-	}
-
-	logger.warn(`Database not found at ${dbPath}, creating and initializing`);
-
-	mkdirSync(workspaceFolder, { recursive: true });
-
-	db = new Database(dbPath);
-	db.pragma("journal_mode = WAL");
-	db.pragma("foreign_keys = ON");
-	db.exec(CURRENT_SCHEMA);
-
-	logger.info("Database initialized");
-	return db;
+	});
 }
 
 export function getDb(): DatabaseType {

@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -5,17 +6,19 @@ export interface Config {
 	telegramToken: string;
 	workspace: string;
 	sessionDir: string;
+	logLevel: string;
 	thinkingLevel: "low" | "medium" | "high";
 	allowedUsers: number[];
-	// Rate limiting
 	rateLimitCooldownMs: number;
-	// Timeouts
 	piTimeoutMs: number;
 	shellTimeoutMs: number;
 	sessionTitleTimeoutMs: number;
 }
 
+let cachedConfig: Config | undefined;
+
 export function loadConfig(): Config {
+	if (cachedConfig) return cachedConfig;
 	const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 	if (!token) {
 		throw new Error("TELEGRAM_BOT_TOKEN is required. Set it in .env file.");
@@ -59,10 +62,13 @@ export function loadConfig(): Config {
 		10,
 	);
 
-	return {
+	const logLevel = process.env.LOG_LEVEL?.trim() || "info";
+
+	cachedConfig = {
 		telegramToken: token,
 		workspace,
 		sessionDir,
+		logLevel,
 		thinkingLevel,
 		allowedUsers,
 		rateLimitCooldownMs,
@@ -70,4 +76,9 @@ export function loadConfig(): Config {
 		shellTimeoutMs,
 		sessionTitleTimeoutMs,
 	};
+	return cachedConfig;
+}
+
+export function resetConfigCache(): void {
+	cachedConfig = undefined;
 }
