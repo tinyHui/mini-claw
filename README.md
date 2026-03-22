@@ -183,8 +183,11 @@ MIT
 - [x] Handle image
 - [x] Handle other types of files (basic)
 - [X] Use sqlite3 to store messsages
-- [ ] pi-mono core agent SDK to replace the interactive cli
+- [X] pi-mono core agent SDK to replace the interactive cli
+- [X] Sandbox restriction for all bash execution
+- [X] OpenClaw alike SOUL.md updated
+- [ ] OpenClaw alike USER.md, but support multiple of them and link the relative one with each session
+- [ ] Connect with mem0 to support cross session memory
 - [ ] Support scheduled jobs
 - [ ] Install skills to make research work
-- [ ] Connect with mem0 to support cross session memory
 - [ ] Support enriched files
