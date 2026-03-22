@@ -1,0 +1,29 @@
+---
+description: Require tests for new files and function changes
+alwaysApply: true
+---
+
+# Test Updates Are Mandatory
+
+When creating files or modifying function behavior, create or update tests in the same change.
+
+## Requirements
+
+- New source file -> add corresponding tests.
+- Function behavior change -> update existing tests and add new cases if needed.
+- Bug fix -> add a regression test that fails before the fix and passes after.
+- Refactor with unchanged behavior -> keep tests passing and adjust only test structure if necessary.
+- Do not mark implementation complete without relevant test updates.
+
+## Practical Expectations
+
+- Prefer colocated or clearly paired test files (for example, `foo.ts` with `foo.test.ts`).
+- Cover success path, key edge cases, and error handling.
+- If tests are intentionally skipped, document a short reason and a follow-up task.
+
+## Example
+
+```typescript
+// Changed: src/math.ts -> function divide(a, b)
+// Required: update src/math.test.ts with divide-by-zero and decimal cases.
+```

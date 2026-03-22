@@ -1,0 +1,34 @@
+---
+description: Keep TypeScript files small and SOLID
+globs: **/*.ts
+alwaysApply: false
+---
+
+# SOLID File Size and Decomposition Rule
+
+When implementing features, avoid long files. Prefer small, focused modules that follow SOLID.
+
+## Core Requirements
+
+- Keep each file focused on one responsibility.
+- Split classes/functions when one module starts handling multiple concerns.
+- Prefer composition over deep inheritance.
+- Depend on abstractions (interfaces/types), not concrete implementations.
+- Extract reusable logic into dedicated modules instead of duplicating code.
+
+## Practical Guidance
+
+- Aim for small files (roughly under 200 lines unless justified).
+- If a file grows quickly, break it into:
+  - domain logic
+  - orchestration/service layer
+  - adapters/integration code
+  - validation/parsing helpers
+- Avoid "god" services that do data access, business rules, and formatting in one place.
+
+## Example
+
+```typescript
+// ❌ BAD: one file handles validation + business logic + API formatting
+// ✅ GOOD: split into user-validator.ts, user-service.ts, user-presenter.ts
+```

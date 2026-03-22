@@ -1,11 +1,21 @@
-import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import {
+	AuthStorage,
+	type AgentSession,
+	type AgentSessionEvent,
+	ModelRegistry,
+	createAgentSession,
+	DefaultResourceLoader,
+	SessionManager,
+} from "@mariozechner/pi-coding-agent";
 import type { Config } from "./config.js";
+import { readSoulPromptFile } from "./pi-utils.js";
 
 interface RunResult {
 	output: string;
 	error?: string;
+	trace?: string;
 }
 
 export type ActivityType =
@@ -24,55 +34,312 @@ export interface ActivityUpdate {
 
 export type ActivityCallback = (activity: ActivityUpdate) => void;
 
-// Parse Pi output to detect activity type
-function detectActivity(
-	line: string,
-): { type: ActivityType; detail: string } | null {
-	const trimmed = line.trim();
-	if (!trimmed) return null;
+// Placeholder for future queue strategy extension.
+const STREAMING_QUEUE_MODE: "followUp" | "steer" = "followUp";
 
-	// Detect common Pi output patterns
-	if (/^(Reading|Read)\s+/i.test(trimmed)) {
-		const match = trimmed.match(/^(?:Reading|Read)\s+(.+)/i);
-		return { type: "reading", detail: match?.[1] || "file" };
-	}
-	if (/^(Writing|Wrote|Creating|Created)\s+/i.test(trimmed)) {
-		const match = trimmed.match(/^(?:Writing|Wrote|Creating|Created)\s+(.+)/i);
-		return { type: "writing", detail: match?.[1] || "file" };
-	}
-	if (/^(Running|Executing|>\s*\$)/i.test(trimmed)) {
-		const match = trimmed.match(/^(?:Running|Executing|>\s*\$)\s*(.+)/i);
-		return { type: "running", detail: match?.[1]?.slice(0, 50) || "command" };
-	}
-	if (/^(Searching|Search|Looking|Finding)/i.test(trimmed)) {
-		return { type: "searching", detail: "codebase" };
-	}
-	if (/^(Thinking|Analyzing|Processing)/i.test(trimmed)) {
-		return { type: "thinking", detail: "" };
-	}
-
-	return null;
+interface PendingRequest {
+	startedAt: number;
+	onActivity: ActivityCallback;
+	resolve: (result: RunResult) => void;
+	reject: (error: unknown) => void;
+	textDeltas: string[];
+	trace: string[];
+	timeout: NodeJS.Timeout;
+	heartbeat: NodeJS.Timeout;
 }
 
-const locks = new Map<string, Promise<void>>();
-
-export async function acquireLock(lockKey: string): Promise<() => void> {
-	while (locks.has(lockKey)) {
-		await locks.get(lockKey);
-	}
-	let release: (() => void) | undefined;
-	const promise = new Promise<void>((resolve) => {
-		release = resolve;
-	});
-	locks.set(lockKey, promise);
-	return () => {
-		locks.delete(lockKey);
-		release?.();
-	};
+interface ChannelRuntime {
+	sessionId?: string;
+	workspace?: string;
+	session?: AgentSession;
+	sessionReady?: Promise<AgentSession>;
+	queue: PendingRequest[];
+	running: boolean;
+	unsubscribe?: () => void;
 }
 
-function getSessionPath(config: Config, sessionId: string): string {
-	return join(config.sessionDir, `session-${sessionId}.jsonl`);
+class PiSdkRunner {
+	private readonly authStorage: AuthStorage;
+	private readonly modelRegistry: ModelRegistry;
+	private readonly runtimes = new Map<string, ChannelRuntime>();
+
+	constructor(private readonly config: Config) {
+		this.authStorage = AuthStorage.create();
+		this.modelRegistry = new ModelRegistry(this.authStorage);
+	}
+
+	async checkAuth(): Promise<boolean> {
+		try {
+			const available = await this.modelRegistry.getAvailable();
+			return available.length > 0;
+		} catch {
+			return false;
+		}
+	}
+
+	async runWithStreaming(
+		channelId: string,
+		sessionId: string,
+		prompt: string,
+		workspace: string,
+		onActivity: ActivityCallback,
+	): Promise<RunResult> {
+		const runtime = this.getRuntime(channelId);
+		const session = await this.getOrCreateSession(runtime, sessionId, workspace);
+		const resultPromise = new Promise<RunResult>((resolve, reject) => {
+			const request: PendingRequest = {
+				startedAt: Date.now(),
+				onActivity,
+				resolve,
+				reject,
+				textDeltas: [],
+				trace: [],
+				timeout: setTimeout(() => {
+					void session.abort().catch(() => {});
+					this.failAll(runtime, new Error("Timeout: Pi took too long"));
+				}, this.config.piTimeoutMs),
+				heartbeat: setInterval(() => {
+					const elapsed = Math.floor((Date.now() - request.startedAt) / 1000);
+					request.onActivity({ type: "working", detail: "", elapsed });
+				}, 5000),
+			};
+			runtime.queue.push(request);
+		});
+		const request = runtime.queue[runtime.queue.length - 1];
+
+		if (!runtime.running) {
+			runtime.running = true;
+			void session.prompt(prompt).catch((error) => {
+				this.failAll(runtime, error);
+			});
+		} else {
+			try {
+				if (STREAMING_QUEUE_MODE === "followUp") {
+					await session.followUp(prompt);
+				} else {
+					await session.steer(prompt);
+				}
+			} catch (error) {
+				this.removeRequest(runtime, request);
+				clearTimeout(request.timeout);
+				clearInterval(request.heartbeat);
+				return {
+					output: "",
+					error: `Failed to queue follow-up: ${this.errorMessage(error)}`,
+				};
+			}
+		}
+
+		try {
+			return await resultPromise;
+		} catch (error) {
+			return {
+				output: "",
+				error: this.errorMessage(error),
+			};
+		}
+	}
+
+	private getRuntime(channelId: string): ChannelRuntime {
+		let runtime = this.runtimes.get(channelId);
+		if (!runtime) {
+			runtime = {
+				queue: [],
+				running: false,
+			};
+			this.runtimes.set(channelId, runtime);
+		}
+		return runtime;
+	}
+
+	private async getOrCreateSession(
+		runtime: ChannelRuntime,
+		sessionId: string,
+		workspace: string,
+	): Promise<AgentSession> {
+		if (runtime.session && runtime.sessionId === sessionId && runtime.workspace === workspace) {
+			return runtime.session;
+		}
+
+		if (!runtime.sessionReady) {
+			runtime.sessionReady = this.createSession(sessionId, workspace);
+		}
+		const session = await runtime.sessionReady.finally(() => {
+			runtime.sessionReady = undefined;
+		});
+
+		if (runtime.unsubscribe) {
+			runtime.unsubscribe();
+		}
+		if (runtime.session && runtime.session !== session) {
+			runtime.session.dispose();
+		}
+
+		runtime.sessionId = sessionId;
+		runtime.workspace = workspace;
+		runtime.session = session;
+		runtime.unsubscribe = session.subscribe((event) => {
+			this.handleSessionEvent(runtime, event);
+		});
+
+		return session;
+	}
+
+	private async createSession(sessionId: string, workspace: string): Promise<AgentSession> {
+		await mkdir(this.config.sessionDir, { recursive: true });
+
+		const sessionManager = await this.getSessionManager(workspace, sessionId);
+
+		const soulPrompt = await readSoulPromptFile(workspace);
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: workspace,
+			systemPromptOverride: () => soulPrompt,
+		});
+		await resourceLoader.reload();
+
+		const { session } = await createAgentSession({
+			cwd: workspace,
+			authStorage: this.authStorage,
+			modelRegistry: this.modelRegistry,
+			thinkingLevel: this.config.thinkingLevel,
+			sessionManager,
+			resourceLoader,
+		});
+
+		return session;
+	}
+
+	private async getSessionManager(
+		workspace: string,
+		sessionId: string,
+	): Promise<SessionManager> {
+		const isolatedSessionDir = join(this.config.sessionDir, `session-${sessionId}`);
+		await mkdir(isolatedSessionDir, { recursive: true });
+		return SessionManager.continueRecent(workspace, isolatedSessionDir);
+	}
+
+	private handleSessionEvent(runtime: ChannelRuntime, event: AgentSessionEvent): void {
+		const request = runtime.queue[0];
+		if (!request) {
+			if (event.type === "agent_end") {
+				runtime.running = false;
+			}
+			return;
+		}
+
+		this.recordTrace(request, event);
+		this.emitActivity(request, event);
+
+		if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+			request.textDeltas.push(event.assistantMessageEvent.delta);
+		}
+
+		// message_end can happen before assistant text is available (e.g. user message lifecycle).
+		// Resolve only when we have assistant output for this request.
+		if (event.type === "message_end" && request.textDeltas.length > 0) {
+			this.resolveHead(runtime);
+		}
+
+		if (event.type === "agent_end") {
+			// Safety net: if no assistant text arrived, finish pending request on agent end.
+			if (runtime.queue.length > 0) {
+				this.resolveHead(runtime);
+			}
+			runtime.running = false;
+		}
+	}
+
+	private resolveHead(runtime: ChannelRuntime): void {
+		const request = runtime.queue.shift();
+		if (!request) return;
+		clearTimeout(request.timeout);
+		clearInterval(request.heartbeat);
+		const output = request.textDeltas.join("").trim()
+			|| runtime.session?.getLastAssistantText()
+			|| "(no output)";
+		request.resolve({
+			output,
+			trace: request.trace.join("\n"),
+		});
+	}
+
+	private failAll(runtime: ChannelRuntime, error: unknown): void {
+		const message = this.errorMessage(error);
+		while (runtime.queue.length > 0) {
+			const request = runtime.queue.shift();
+			if (!request) continue;
+			clearTimeout(request.timeout);
+			clearInterval(request.heartbeat);
+			request.resolve({
+				output: "",
+				error: message,
+				trace: request.trace.join("\n"),
+			});
+		}
+		runtime.running = false;
+	}
+
+	private removeRequest(runtime: ChannelRuntime, target: PendingRequest): void {
+		const index = runtime.queue.indexOf(target);
+		if (index >= 0) {
+			runtime.queue.splice(index, 1);
+		}
+	}
+
+	private emitActivity(request: PendingRequest, event: AgentSessionEvent): void {
+		const elapsed = Math.floor((Date.now() - request.startedAt) / 1000);
+		if (event.type === "tool_execution_start") {
+			request.onActivity({
+				type: "running",
+				detail: event.toolName,
+				elapsed,
+			});
+			return;
+		}
+		if (event.type === "message_update" && event.assistantMessageEvent.type === "thinking_delta") {
+			request.onActivity({ type: "thinking", detail: "", elapsed });
+			return;
+		}
+		if (event.type === "agent_start" || event.type === "turn_start") {
+			request.onActivity({ type: "working", detail: "", elapsed });
+		}
+	}
+
+	private recordTrace(request: PendingRequest, event: AgentSessionEvent): void {
+		switch (event.type) {
+			case "message_update":
+				if (event.assistantMessageEvent.type === "text_delta") {
+					request.trace.push(`text_delta: ${event.assistantMessageEvent.delta}`);
+				}
+				if (event.assistantMessageEvent.type === "thinking_delta") {
+					request.trace.push(`thinking_delta: ${event.assistantMessageEvent.delta}`);
+				}
+				return;
+			case "tool_execution_start":
+				request.trace.push(`tool_start: ${event.toolName}`);
+				return;
+			case "tool_execution_end":
+				request.trace.push(
+					`tool_end: ${event.toolName} (${event.isError ? "error" : "ok"})`,
+				);
+				return;
+			default:
+				request.trace.push(event.type);
+		}
+	}
+
+	private errorMessage(error: unknown): string {
+		return error instanceof Error ? error.message : String(error);
+	}
+}
+
+let runner: PiSdkRunner | undefined;
+
+function getRunner(config: Config): PiSdkRunner {
+	if (!runner) {
+		runner = new PiSdkRunner(config);
+	}
+	return runner;
 }
 
 export async function runPi(
@@ -81,66 +348,15 @@ export async function runPi(
 	sessionId: string,
 	prompt: string,
 	workspace: string,
-	files?: string[],
+	_files?: string[],
 ): Promise<RunResult> {
-	const release = await acquireLock(channelId);
-
-	try {
-		await mkdir(config.sessionDir, { recursive: true });
-
-		const sessionPath = getSessionPath(config, sessionId);
-
-		const args = [
-			"--session",
-			sessionPath,
-			"--print",
-			"--thinking",
-			config.thinkingLevel,
-			...(files ?? []).map((f) => `@${f}`),
-			prompt,
-		];
-
-		return await new Promise<RunResult>((resolve) => {
-			const proc = spawn("pi", args, {
-				cwd: workspace,
-				env: {
-					...process.env,
-					PI_AGENT_DIR: join(process.env.HOME || "", ".pi", "agent"),
-				},
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-
-			let stdout = "";
-			let stderr = "";
-
-			proc.stdout.on("data", (data) => {
-				stdout += data.toString();
-			});
-
-			proc.stderr.on("data", (data) => {
-				stderr += data.toString();
-			});
-
-			proc.on("close", (code) => {
-				if (code !== 0 && stderr) {
-					resolve({ output: stdout || "Error occurred", error: stderr });
-				} else {
-					resolve({ output: stdout || "(no output)" });
-				}
-			});
-
-			proc.on("error", (err) => {
-				resolve({ output: "", error: `Failed to start Pi: ${err.message}` });
-			});
-
-			setTimeout(() => {
-				proc.kill("SIGTERM");
-				resolve({ output: stdout || "", error: "Timeout: Pi took too long" });
-			}, config.piTimeoutMs);
-		});
-	} finally {
-		release();
-	}
+	return getRunner(config).runWithStreaming(
+		channelId,
+		sessionId,
+		prompt,
+		workspace,
+		() => {},
+	);
 }
 
 export async function runPiWithStreaming(
@@ -150,116 +366,20 @@ export async function runPiWithStreaming(
 	prompt: string,
 	workspace: string,
 	onActivity: ActivityCallback,
-	files?: string[],
+	_files?: string[],
 ): Promise<RunResult> {
-	const release = await acquireLock(channelId);
-	const startTime = Date.now();
-	let lastActivity: ActivityUpdate | null = null;
-
-	try {
-		await mkdir(config.sessionDir, { recursive: true });
-		const sessionPath = getSessionPath(config, sessionId);
-
-		const args = [
-			"--session",
-			sessionPath,
-			"--print",
-			"--thinking",
-			config.thinkingLevel,
-			...(files ?? []).map((f) => `@${f}`),
-			prompt,
-		];
-
-		return await new Promise<RunResult>((resolve) => {
-			const proc = spawn("pi", args, {
-				cwd: workspace,
-				env: {
-					...process.env,
-					PI_AGENT_DIR: join(process.env.HOME || "", ".pi", "agent"),
-				},
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-
-			let stdout = "";
-			let stderr = "";
-			let lineBuffer = "";
-
-			// Process output line by line for activity detection
-			const processLine = (line: string) => {
-				const activity = detectActivity(line);
-				if (activity) {
-					const elapsed = Math.floor((Date.now() - startTime) / 1000);
-					lastActivity = { ...activity, elapsed };
-					onActivity(lastActivity);
-				}
-			};
-
-			proc.stdout.on("data", (data) => {
-				const chunk = data.toString();
-				stdout += chunk;
-				lineBuffer += chunk;
-
-				// Process complete lines
-				const lines = lineBuffer.split("\n");
-				lineBuffer = lines.pop() || "";
-				for (const line of lines) {
-					processLine(line);
-				}
-			});
-
-			proc.stderr.on("data", (data) => {
-				stderr += data.toString();
-			});
-
-			// Send periodic "working" updates if no specific activity detected
-			const activityInterval = setInterval(() => {
-				const elapsed = Math.floor((Date.now() - startTime) / 1000);
-				if (!lastActivity || elapsed - lastActivity.elapsed > 5) {
-					onActivity({ type: "working", detail: "", elapsed });
-				}
-			}, 5000);
-
-			proc.on("close", (code) => {
-				clearInterval(activityInterval);
-				// Process remaining buffer
-				if (lineBuffer) {
-					processLine(lineBuffer);
-				}
-				if (code !== 0 && stderr) {
-					resolve({ output: stdout || "Error occurred", error: stderr });
-				} else {
-					resolve({ output: stdout || "(no output)" });
-				}
-			});
-
-			proc.on("error", (err) => {
-				clearInterval(activityInterval);
-				resolve({ output: "", error: `Failed to start Pi: ${err.message}` });
-			});
-
-			setTimeout(() => {
-				clearInterval(activityInterval);
-				proc.kill("SIGTERM");
-				resolve({ output: stdout || "", error: "Timeout: Pi took too long" });
-			}, config.piTimeoutMs);
-		});
-	} finally {
-		release();
-	}
+	return getRunner(config).runWithStreaming(
+		channelId,
+		sessionId,
+		prompt,
+		workspace,
+		onActivity,
+	);
 }
 
 export async function checkPiAuth(): Promise<boolean> {
-	return new Promise((resolve) => {
-		const proc = spawn("pi", ["--version"], {
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-
-		proc.on("close", (code) => {
-			resolve(code === 0);
-		});
-
-		proc.on("error", () => {
-			resolve(false);
-		});
-	});
+	const authStorage = AuthStorage.create();
+	const modelRegistry = new ModelRegistry(authStorage);
+	const available = await modelRegistry.getAvailable();
+	return available.length > 0;
 }

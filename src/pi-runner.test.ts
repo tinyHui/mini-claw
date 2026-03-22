@@ -1,28 +1,47 @@
-import type { ChildProcess } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "./config.js";
 
-// Create mock instances
 const mockMkdir = vi.fn();
-const mockSpawn = vi.fn();
+const mockReadSoulPromptFile = vi.fn();
+
+const listeners: Array<(event: any) => void> = [];
+const mockPrompt = vi.fn();
+const mockFollowUp = vi.fn();
+const mockAbort = vi.fn();
+const mockGetLastAssistantText = vi.fn();
+
+const mockGetAvailable = vi.fn();
+const mockCreateAgentSession = vi.fn();
 
 vi.mock("node:fs/promises", () => ({
 	mkdir: (...args: unknown[]) => mockMkdir(...args),
 }));
 
-vi.mock("node:child_process", () => ({
-	spawn: (...args: unknown[]) => mockSpawn(...args),
+vi.mock("./pi-utils.js", () => ({
+	readSoulPromptFile: (...args: unknown[]) => mockReadSoulPromptFile(...args),
 }));
 
-// Import after mocking
-const { runPi, checkPiAuth } = await import("./pi-runner.js");
+vi.mock("@mariozechner/pi-coding-agent", () => ({
+	AuthStorage: { create: vi.fn(() => ({})) },
+	ModelRegistry: class {
+		getAvailable = mockGetAvailable;
+	},
+	DefaultResourceLoader: class {
+		reload = vi.fn().mockResolvedValue(undefined);
+	},
+	SessionManager: {
+		open: vi.fn(() => ({})),
+		create: vi.fn(() => ({ sessionFile: "/tmp/created.jsonl" })),
+		continueRecent: vi.fn(() => ({})),
+	},
+	createAgentSession: (...args: unknown[]) => mockCreateAgentSession(...args),
+}));
 
 describe("pi-runner", () => {
-	const mockConfig: Config = {
-		telegramToken: "test-token",
-		workspace: "/mock/workspace",
-		sessionDir: "/mock/sessions",
+	const config: Config = {
+		telegramToken: "token",
+		workspace: "/workspace",
+		sessionDir: "/sessions",
 		thinkingLevel: "low",
 		allowedUsers: [],
 		rateLimitCooldownMs: 5000,
@@ -31,368 +50,103 @@ describe("pi-runner", () => {
 		sessionTitleTimeoutMs: 10000,
 	};
 
-	function createMockProcess(): ChildProcess & EventEmitter {
-		const proc = new EventEmitter() as ChildProcess & EventEmitter;
-		proc.stdout = new EventEmitter() as ChildProcess["stdout"];
-		proc.stderr = new EventEmitter() as ChildProcess["stderr"];
-		proc.kill = vi.fn();
-		return proc;
-	}
-
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.resetModules();
 		vi.useFakeTimers();
+		listeners.length = 0;
 		mockMkdir.mockResolvedValue(undefined);
+		mockReadSoulPromptFile.mockResolvedValue("");
+		mockGetAvailable.mockResolvedValue([{ provider: "anthropic", id: "x" }]);
+		mockCreateAgentSession.mockResolvedValue({
+			session: {
+				subscribe: (listener: (event: any) => void) => {
+					listeners.push(listener);
+					return () => {};
+				},
+				prompt: mockPrompt,
+				followUp: mockFollowUp,
+				steer: vi.fn(),
+				abort: mockAbort.mockResolvedValue(undefined),
+				dispose: vi.fn(),
+				getLastAssistantText: mockGetLastAssistantText,
+			},
+		});
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	describe("runPi", () => {
-		it("should create session directory if it doesn't exist", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "hello", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.stdout?.emit("data", "response");
-			mockProc.emit("close", 0);
-
-			await resultPromise;
-
-			expect(mockMkdir).toHaveBeenCalledWith("/mock/sessions", {
-				recursive: true,
-			});
-		});
-
-		it("should spawn pi with correct arguments", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test prompt", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.stdout?.emit("data", "response");
-			mockProc.emit("close", 0);
-
-			await resultPromise;
-
-			expect(mockSpawn).toHaveBeenCalledWith(
-				"pi",
-				[
-					"--session",
-					"/mock/sessions/session-sess-abc.jsonl",
-					"--print",
-					"--thinking",
-					"low",
-					"test prompt",
-				],
-				expect.objectContaining({
-					cwd: "/workspace",
-					stdio: ["ignore", "pipe", "pipe"],
-				}),
-			);
-		});
-
-		it("should use configured thinking level", async () => {
-			const highConfig = { ...mockConfig, thinkingLevel: "high" as const };
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = runPi(highConfig, "ch-123", "sess-abc", "test", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.stdout?.emit("data", "response");
-			mockProc.emit("close", 0);
-
-			await resultPromise;
-
-			expect(mockSpawn).toHaveBeenCalledWith(
-				"pi",
-				expect.arrayContaining(["--thinking", "high"]),
-				expect.any(Object),
-			);
-		});
-
-		it("should return stdout as output", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.stdout?.emit("data", "Hello ");
-			mockProc.stdout?.emit("data", "World");
-			mockProc.emit("close", 0);
-
-			const result = await resultPromise;
-
-			expect(result.output).toBe("Hello World");
-			expect(result.error).toBeUndefined();
-		});
-
-		it("should return stderr as error on non-zero exit", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.stderr?.emit("data", "error message");
-			mockProc.emit("close", 1);
-
-			const result = await resultPromise;
-
-			expect(result.output).toBe("Error occurred");
-			expect(result.error).toBe("error message");
-		});
-
-		it("should return (no output) when stdout is empty", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.emit("close", 0);
-
-			const result = await resultPromise;
-
-			expect(result.output).toBe("(no output)");
-		});
-
-		it("should handle spawn error", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.emit("error", new Error("spawn ENOENT"));
-
-			const result = await resultPromise;
-
-			expect(result.output).toBe("");
-			expect(result.error).toBe("Failed to start Pi: spawn ENOENT");
-		});
-
-		it("should timeout after 5 minutes", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.stdout?.emit("data", "partial output");
-
-			// Advance time by 5 minutes
-			vi.advanceTimersByTime(5 * 60 * 1000);
-
-			const result = await resultPromise;
-
-			expect(mockProc.kill).toHaveBeenCalledWith("SIGTERM");
-			expect(result.output).toBe("partial output");
-			expect(result.error).toBe("Timeout: Pi took too long");
-		});
-
-		it("should serialize concurrent calls for same channelId", async () => {
-			const mockProc1 = createMockProcess();
-			const mockProc2 = createMockProcess();
-			let callCount = 0;
-			mockSpawn.mockImplementation(() => {
-				callCount++;
-				return callCount === 1 ? mockProc1 : mockProc2;
-			});
-
-			const result1Promise = runPi(mockConfig, "ch-123", "sess-1", "first", "/workspace");
-			const result2Promise = runPi(mockConfig, "ch-123", "sess-2", "second", "/workspace");
-
-			// First call should start immediately
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
-
-			// Complete first call
-			mockProc1.stdout?.emit("data", "first response");
-			mockProc1.emit("close", 0);
-
-			// Second call should start after first completes
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
-
-			mockProc2.stdout?.emit("data", "second response");
-			mockProc2.emit("close", 0);
-
-			const [result1, result2] = await Promise.all([
-				result1Promise,
-				result2Promise,
-			]);
-
-			expect(result1.output).toBe("first response");
-			expect(result2.output).toBe("second response");
-		});
-
-		it("should allow parallel calls for different channelIds", async () => {
-			const mockProc1 = createMockProcess();
-			const mockProc2 = createMockProcess();
-			let callCount = 0;
-			mockSpawn.mockImplementation(() => {
-				callCount++;
-				return callCount === 1 ? mockProc1 : mockProc2;
-			});
-
-			const result1Promise = runPi(mockConfig, "ch-123", "sess-1", "first", "/workspace");
-			const result2Promise = runPi(mockConfig, "ch-456", "sess-2", "second", "/workspace");
-
-			// Both should start immediately
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
-
-			mockProc1.stdout?.emit("data", "response 1");
-			mockProc2.stdout?.emit("data", "response 2");
-			mockProc1.emit("close", 0);
-			mockProc2.emit("close", 0);
-
-			const [result1, result2] = await Promise.all([
-				result1Promise,
-				result2Promise,
-			]);
-
-			expect(result1.output).toBe("response 1");
-			expect(result2.output).toBe("response 2");
-		});
-
-		it("should release lock even on error", async () => {
-			const mockProc1 = createMockProcess();
-			const mockProc2 = createMockProcess();
-			let callCount = 0;
-			mockSpawn.mockImplementation(() => {
-				callCount++;
-				return callCount === 1 ? mockProc1 : mockProc2;
-			});
-
-			const result1Promise = runPi(mockConfig, "ch-123", "sess-1", "first", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
-
-			// First call fails
-			mockProc1.emit("error", new Error("crash"));
-
-			await result1Promise;
-
-			// Second call should still work
-			const result2Promise = runPi(mockConfig, "ch-123", "sess-2", "second", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
-
-			mockProc2.stdout?.emit("data", "success");
-			mockProc2.emit("close", 0);
-
-			const result2 = await result2Promise;
-			expect(result2.output).toBe("success");
-		});
-
-		it("should include PI_AGENT_DIR in environment", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const originalHome = process.env.HOME;
-			process.env.HOME = "/test/home";
-
-			const resultPromise = runPi(mockConfig, "ch-123", "sess-abc", "test", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.emit("close", 0);
-
-			await resultPromise;
-
-			expect(mockSpawn).toHaveBeenCalledWith(
-				"pi",
-				expect.any(Array),
-				expect.objectContaining({
-					env: expect.objectContaining({
-						PI_AGENT_DIR: "/test/home/.pi/agent",
-					}),
-				}),
-			);
-
-			process.env.HOME = originalHome;
-		});
-
-		it("should use sessionId in session file path", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = runPi(mockConfig, "ch-100", "my-uuid-123", "test", "/workspace");
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.emit("close", 0);
-
-			await resultPromise;
-
-			expect(mockSpawn).toHaveBeenCalledWith(
-				"pi",
-				expect.arrayContaining([
-					"--session",
-					"/mock/sessions/session-my-uuid-123.jsonl",
-				]),
-				expect.any(Object),
-			);
-		});
+	it("checks auth through model registry availability", async () => {
+		const { checkPiAuth } = await import("./pi-runner.js");
+		mockGetAvailable.mockResolvedValueOnce([]);
+		await expect(checkPiAuth()).resolves.toBe(false);
+		mockGetAvailable.mockResolvedValueOnce([{ provider: "x", id: "y" }]);
+		await expect(checkPiAuth()).resolves.toBe(true);
 	});
 
-	describe("checkPiAuth", () => {
-		it("should return true when pi --version succeeds", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = checkPiAuth();
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.emit("close", 0);
-
-			const result = await resultPromise;
-			expect(result).toBe(true);
-		});
-
-		it("should return false when pi --version fails", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = checkPiAuth();
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.emit("close", 1);
-
-			const result = await resultPromise;
-			expect(result).toBe(false);
-		});
-
-		it("should return false when spawn fails", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = checkPiAuth();
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.emit("error", new Error("ENOENT"));
-
-			const result = await resultPromise;
-			expect(result).toBe(false);
-		});
-
-		it("should call pi with --version flag", async () => {
-			const mockProc = createMockProcess();
-			mockSpawn.mockReturnValue(mockProc);
-
-			const resultPromise = checkPiAuth();
-
-			await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
-			mockProc.emit("close", 0);
-
-			await resultPromise;
-
-			expect(mockSpawn).toHaveBeenCalledWith("pi", ["--version"], {
-				stdio: ["ignore", "pipe", "pipe"],
+	it("returns assistant text deltas as output", async () => {
+		const { runPiWithStreaming } = await import("./pi-runner.js");
+		mockPrompt.mockImplementation(async () => {
+			const listener = listeners[0];
+			listener({
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: "Hello " },
 			});
+			listener({
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: "world" },
+			});
+			listener({ type: "message_end" });
+			listener({ type: "agent_end" });
 		});
+
+		const result = await runPiWithStreaming(
+			config,
+			"ch-1",
+			"sess-1",
+			"hi",
+			"/workspace",
+			() => {},
+		);
+		expect(result.output).toBe("Hello world");
+		expect(result.error).toBeUndefined();
+	});
+
+	it("queues followUp while current prompt is running", async () => {
+		const { runPiWithStreaming } = await import("./pi-runner.js");
+		let releasePrompt: (() => void) | undefined;
+		mockPrompt.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					releasePrompt = resolve;
+				}),
+		);
+		mockFollowUp.mockResolvedValue(undefined);
+
+		const first = runPiWithStreaming(config, "ch-1", "sess-1", "first", "/workspace", () => {});
+		const second = runPiWithStreaming(config, "ch-1", "sess-1", "second", "/workspace", () => {});
+
+		await vi.waitFor(() => {
+			expect(mockFollowUp).toHaveBeenCalledWith("second");
+		});
+
+		const listener = listeners[0];
+		listener({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "one" },
+		});
+		listener({ type: "message_end" });
+		listener({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "two" },
+		});
+		listener({ type: "message_end" });
+		listener({ type: "agent_end" });
+		releasePrompt?.();
+
+		await expect(first).resolves.toMatchObject({ output: "one" });
+		await expect(second).resolves.toMatchObject({ output: "two" });
 	});
 });
