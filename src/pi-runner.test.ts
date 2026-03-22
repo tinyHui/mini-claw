@@ -138,6 +138,7 @@ describe("pi-runner", () => {
 			assistantMessageEvent: { type: "text_delta", delta: "one" },
 		});
 		listener({ type: "message_end" });
+		listener({ type: "agent_end" });
 		listener({
 			type: "message_update",
 			assistantMessageEvent: { type: "text_delta", delta: "two" },
@@ -148,5 +149,88 @@ describe("pi-runner", () => {
 
 		await expect(first).resolves.toMatchObject({ output: "one" });
 		await expect(second).resolves.toMatchObject({ output: "two" });
+	});
+
+	it("captures text from after tool execution, not premature empty text", async () => {
+		const { runPiWithStreaming } = await import("./pi-runner.js");
+		mockPrompt.mockImplementation(async () => {
+			const listener = listeners[0];
+			// Turn 1: assistant sends empty text + tool call
+			listener({
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: "" },
+			});
+			listener({ type: "message_end" });
+			listener({ type: "tool_execution_start", toolName: "bash" });
+			listener({ type: "tool_execution_end", toolName: "bash", isError: false });
+			// Turn 2: assistant sends actual response after tool
+			listener({
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: "Here are your files:\n- foo\n- bar" },
+			});
+			listener({ type: "message_end" });
+			listener({ type: "agent_end" });
+		});
+
+		const result = await runPiWithStreaming(
+			config,
+			"ch-1",
+			"sess-1",
+			"list files",
+			"/workspace",
+			() => {},
+		);
+		expect(result.output).toBe("Here are your files:\n- foo\n- bar");
+	});
+
+	it("captures text from both turns when first message has text alongside tool call", async () => {
+		const { runPiWithStreaming } = await import("./pi-runner.js");
+		mockPrompt.mockImplementation(async () => {
+			const listener = listeners[0];
+			// Turn 1: assistant sends text + tool call
+			listener({
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: "Let me check. " },
+			});
+			listener({ type: "message_end" });
+			listener({ type: "tool_execution_start", toolName: "bash" });
+			listener({ type: "tool_execution_end", toolName: "bash", isError: false });
+			// Turn 2: assistant sends more text after tool
+			listener({
+				type: "message_update",
+				assistantMessageEvent: { type: "text_delta", delta: "Found: file1, file2" },
+			});
+			listener({ type: "message_end" });
+			listener({ type: "agent_end" });
+		});
+
+		const result = await runPiWithStreaming(
+			config,
+			"ch-1",
+			"sess-1",
+			"list files",
+			"/workspace",
+			() => {},
+		);
+		expect(result.output).toBe("Let me check. Found: file1, file2");
+	});
+
+	it("falls back to getLastAssistantText when no text deltas received", async () => {
+		const { runPiWithStreaming } = await import("./pi-runner.js");
+		mockGetLastAssistantText.mockReturnValue("fallback text");
+		mockPrompt.mockImplementation(async () => {
+			const listener = listeners[0];
+			listener({ type: "agent_end" });
+		});
+
+		const result = await runPiWithStreaming(
+			config,
+			"ch-1",
+			"sess-1",
+			"hi",
+			"/workspace",
+			() => {},
+		);
+		expect(result.output).toBe("fallback text");
 	});
 });

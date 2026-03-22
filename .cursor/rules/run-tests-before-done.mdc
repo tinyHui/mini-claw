@@ -1,0 +1,15 @@
+---
+description: Run all tests via make test before considering work complete
+alwaysApply: true
+---
+
+# Run Tests Before Done
+
+After making code changes, run all tests with `make test` and ensure they pass before finishing.
+
+## Requirements
+
+- Run `make test` after any source or test file change.
+- If any test fails, fix the failure before moving on.
+- Do not consider a task complete until `make test` exits with zero failures.
+- When a fix causes a new failure, iterate until the full suite is green.

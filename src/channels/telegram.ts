@@ -1,4 +1,4 @@
-import { Bot, Context } from "grammy";
+import { Bot, Context, GrammyError } from "grammy";
 import type { Channel, DeliveryStatus, MessageCallback, MessageSentCallback } from "./channel.js";
 import type { Config } from "../config.js";
 import { logger, withLogContext } from "../logger.js";
@@ -80,35 +80,66 @@ export class TelegramChannel implements Channel {
 		status: DeliveryStatus = "processed",
 	): Promise<void> {
 		const chatId = parseInt(channelId, 10);
-		let deliveredMsgId: string;
 
 		if (platformMsgId !== undefined) {
-			try {
-				await this.bot.api.editMessageText(
-					chatId,
-					parseInt(platformMsgId, 10),
-					content,
-				);
-				deliveredMsgId = platformMsgId;
-			} catch {
-				withLogContext(
-					{
-						operation: "edit_message_fallback",
-						channelId,
-						sessionId,
-						platformMsgId,
-					},
-					() => logger.warn("Failed to edit message, sending a new message instead"),
-				);
-				deliveredMsgId = await this.sendNewMessage(chatId, content);
-			}
+			await this.editOrReplaceMessage(chatId, parseInt(platformMsgId, 10), content);
 		} else {
-			deliveredMsgId = await this.sendNewMessage(chatId, content);
+			await this.sendNewMessage(chatId, content);
 		}
 
 		if (status === "processed" && this.messageSentCallback) {
-			await this.messageSentCallback(sessionId, deliveredMsgId, content, "processed");
+			await this.messageSentCallback(sessionId, platformMsgId ?? "unknown", content, "processed");
 		}
+	}
+
+	private async editOrReplaceMessage(
+		chatId: number,
+		messageId: number,
+		content: string,
+	): Promise<void> {
+		if (content.length > MAX_MESSAGE_LENGTH) {
+			await this.tryDeleteMessage(chatId, messageId);
+			await this.sendNewMessage(chatId, content);
+			return;
+		}
+
+		try {
+			const html = markdownToHtml(content);
+			await this.bot.api.editMessageText(chatId, messageId, html, { parse_mode: "HTML" });
+			return;
+		} catch (err) {
+			if (this.isMessageNotModified(err)) return;
+			logger.debug("HTML edit failed, trying plain text", {
+				error: err instanceof GrammyError ? err.description : String(err),
+			});
+		}
+
+		try {
+			await this.bot.api.editMessageText(chatId, messageId, stripMarkdown(content));
+			return;
+		} catch (err) {
+			if (this.isMessageNotModified(err)) return;
+			logger.warn("Edit failed, replacing with new message", {
+				chatId,
+				messageId,
+				error: err instanceof GrammyError ? err.description : String(err),
+			});
+		}
+
+		await this.tryDeleteMessage(chatId, messageId);
+		await this.sendNewMessage(chatId, content);
+	}
+
+	private async tryDeleteMessage(chatId: number, messageId: number): Promise<void> {
+		try {
+			await this.bot.api.deleteMessage(chatId, messageId);
+		} catch {
+			logger.debug("Could not delete message", { chatId, messageId });
+		}
+	}
+
+	private isMessageNotModified(err: unknown): boolean {
+		return err instanceof GrammyError && err.description.includes("message is not modified");
 	}
 
 	private async sendNewMessage(chatId: number, content: string): Promise<string> {

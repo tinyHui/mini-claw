@@ -234,14 +234,7 @@ class PiSdkRunner {
 			request.textDeltas.push(event.assistantMessageEvent.delta);
 		}
 
-		// message_end can happen before assistant text is available (e.g. user message lifecycle).
-		// Resolve only when we have assistant output for this request.
-		if (event.type === "message_end" && request.textDeltas.length > 0) {
-			this.resolveHead(runtime);
-		}
-
 		if (event.type === "agent_end") {
-			// Safety net: if no assistant text arrived, finish pending request on agent end.
 			if (runtime.queue.length > 0) {
 				this.resolveHead(runtime);
 			}
