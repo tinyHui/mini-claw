@@ -1,78 +1,61 @@
 import { randomUUID } from "node:crypto";
+import { desc, eq } from "drizzle-orm";
 import { getDb } from "./db.js";
+import { sessions, type SessionRow } from "./db/schema.js";
 
-export interface Session {
-	id: string;
-	userId: string;
-	createdAt: string;
-	model: string;
-	thinkingLevel: string;
-	budget_minimal: number;
-	budget_low: number;
-	budget_medium: number;
-	budget_high: number;
-}
+export type Session = SessionRow;
 
 export type CreateSessionData = {
-	userId: string;
 	model: string;
 	thinkingLevel: string;
-	budget_minimal?: number;
-	budget_low?: number;
-	budget_medium?: number;
-	budget_high?: number;
 };
+
+let lastCreatedAtMs = 0;
+
+function nextCreatedAt(): string {
+	const now = Date.now();
+	lastCreatedAtMs = Math.max(now, lastCreatedAtMs + 1);
+	return new Date(lastCreatedAtMs).toISOString();
+}
 
 export function createSession(data: CreateSessionData): Session {
 	const db = getDb();
 	const session: Session = {
 		id: randomUUID(),
-		userId: data.userId,
-		createdAt: new Date().toISOString(),
+		createdAt: nextCreatedAt(),
 		model: data.model,
 		thinkingLevel: data.thinkingLevel,
-		budget_minimal: data.budget_minimal ?? 0,
-		budget_low: data.budget_low ?? 0,
-		budget_medium: data.budget_medium ?? 0,
-		budget_high: data.budget_high ?? 0,
 	};
 
-	db.prepare(`
-		INSERT INTO sessions (id, userId, createdAt, model, thinkingLevel, budget_minimal, budget_low, budget_medium, budget_high)
-		VALUES (@id, @userId, @createdAt, @model, @thinkingLevel, @budget_minimal, @budget_low, @budget_medium, @budget_high)
-	`).run(session);
+	db.insert(sessions).values(session).run();
 
 	return session;
 }
 
 export function getSession(sessionId: string): Session | undefined {
 	const db = getDb();
-	return db
-		.prepare("SELECT * FROM sessions WHERE id = ?")
-		.get(sessionId) as Session | undefined;
+	return db.select().from(sessions).where(eq(sessions.id, sessionId)).get();
 }
 
-export function getLatestSessionForUser(userId: string): Session | undefined {
+export function getLatestSession(): Session | undefined {
 	const db = getDb();
 	return db
-		.prepare("SELECT * FROM sessions WHERE userId = ? ORDER BY createdAt DESC LIMIT 1")
-		.get(userId) as Session | undefined;
+		.select()
+		.from(sessions)
+		.orderBy(desc(sessions.createdAt))
+		.limit(1)
+		.get();
 }
 
-export function ensureSession(userId: string): Session {
-	const existing = getLatestSessionForUser(userId);
+export function ensureSession(): Session {
+	const existing = getLatestSession();
 	if (existing) return existing;
-	return createSession({ userId, model: "default", thinkingLevel: "low" });
+	return createSession({ model: "default", thinkingLevel: "low" });
 }
 
-export function resetSession(userId: string): Session {
+export function resetSession(): Session {
 	return createSession({
-		userId,
 		model: "default",
 		thinkingLevel: "low",
-		budget_minimal: 128,
-		budget_low: 512,
-		budget_medium: 1024,
-		budget_high: 2048,
 	});
 }

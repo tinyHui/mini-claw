@@ -28,37 +28,34 @@ function escapeForRegex(s: string): string {
 }
 
 /**
- * New history filename: `YYYY-MM-DDTHH:MM:SS_<user_id>_<session_id_8chars>.jsonl`
+ * New history filename: `YYYY-MM-DDTHH:MM:SS_<session_id_8chars>.jsonl`
  */
 export function buildNewSessionHistoryFilename(
-	userId: string,
 	sessionId: string,
 	now: Date = new Date(),
 ): string {
 	const ts = formatSessionFileTimestamp(now);
 	const short = sessionIdShort(sessionId);
-	return `${ts}_${userId}_${short}${JSONL_EXT}`;
+	return `${ts}_${short}${JSONL_EXT}`;
 }
 
 function matchesSessionHistoryPattern(
 	name: string,
-	userId: string,
 	sessionShort: string,
 ): boolean {
 	const re = new RegExp(
-		`^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}_${escapeForRegex(userId)}_${escapeForRegex(sessionShort)}\\.jsonl$`,
+		`^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}_${escapeForRegex(sessionShort)}\\.jsonl$`,
 	);
 	return re.test(name);
 }
 
 /**
- * Resolve the path to the chat history file for this user/session.
+ * Resolve the path to the chat history file for this session.
  * Reuses an existing file in sessionDir if one matches the pattern; otherwise
  * returns a new path with the current timestamp.
  */
 export async function resolveSessionHistoryPath(
 	sessionDir: string,
-	userId: string,
 	sessionId: string,
 	now: Date = new Date(),
 ): Promise<string> {
@@ -67,14 +64,14 @@ export async function resolveSessionHistoryPath(
 	try {
 		names = await readdir(sessionDir);
 	} catch {
-		return join(sessionDir, buildNewSessionHistoryFilename(userId, sessionId, now));
+		return join(sessionDir, buildNewSessionHistoryFilename(sessionId, now));
 	}
 
 	const matching = names.filter((n) =>
-		matchesSessionHistoryPattern(n, userId, short),
+		matchesSessionHistoryPattern(n, short),
 	);
 	if (matching.length === 0) {
-		return join(sessionDir, buildNewSessionHistoryFilename(userId, sessionId, now));
+		return join(sessionDir, buildNewSessionHistoryFilename(sessionId, now));
 	}
 
 	const withMtime = await Promise.all(

@@ -52,7 +52,7 @@ describe("sandbox-factory", () => {
 				on: vi.fn(),
 			};
 
-			factory(mockPi as any);
+			factory(mockPi as unknown as Parameters<typeof factory>[0]);
 
 			expect(mockPi.registerTool).toHaveBeenCalledTimes(1);
 			const registeredTool = mockPi.registerTool.mock.calls[0][0];
@@ -70,7 +70,7 @@ describe("sandbox-factory", () => {
 				registerTool: vi.fn(),
 				on: vi.fn(),
 			};
-			factory(mockPi as any);
+			factory(mockPi as unknown as Parameters<typeof factory>[0]);
 
 			const toolCallHandler = mockPi.on.mock.calls.find(
 				(call: unknown[]) => call[0] === "tool_call",

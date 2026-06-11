@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../config.js";
+import type { MessageSentCallback } from "./channel.js";
 
 const {
 	mockSendMessage,
 	mockEditMessageText,
 	mockDeleteMessage,
 	mockSetMyCommands,
+	mockUse,
+	mockCommand,
+	mockOn,
 	MockGrammyError,
 } = vi.hoisted(() => {
 	class MockGrammyError extends Error {
@@ -25,6 +29,9 @@ const {
 		mockEditMessageText: vi.fn(),
 		mockDeleteMessage: vi.fn(),
 		mockSetMyCommands: vi.fn().mockResolvedValue(undefined),
+		mockUse: vi.fn(),
+		mockCommand: vi.fn(),
+		mockOn: vi.fn(),
 		MockGrammyError,
 	};
 });
@@ -36,11 +43,11 @@ vi.mock("grammy", () => ({
 			sendMessage: mockSendMessage,
 			editMessageText: mockEditMessageText,
 			deleteMessage: mockDeleteMessage,
-			setMyCommands: () => Promise.resolve(),
+			setMyCommands: mockSetMyCommands,
 		};
-		use = vi.fn();
-		command = vi.fn();
-		on = vi.fn();
+		use = mockUse;
+		command = mockCommand;
+		on = mockOn;
 		start = vi.fn();
 		stop = vi.fn();
 	},
@@ -74,7 +81,6 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
 		sessionDir: "/tmp/sessions",
 		logLevel: "debug",
 		thinkingLevel: "low",
-		allowedUsers: [],
 		rateLimitCooldownMs: 5000,
 		piTimeoutMs: 300000,
 		shellTimeoutMs: 60000,
@@ -97,12 +103,13 @@ function apiError(desc: string) {
 
 describe("TelegramChannel", () => {
 	let channel: TelegramChannel;
-	let sentCallback: ReturnType<typeof vi.fn>;
+	let sentCallback: ReturnType<typeof vi.fn<MessageSentCallback>>;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mockSetMyCommands.mockResolvedValue(undefined);
 		channel = new TelegramChannel(makeConfig());
-		sentCallback = vi.fn();
+		sentCallback = vi.fn<MessageSentCallback>();
 		channel.onMessageSent(sentCallback);
 	});
 
@@ -241,6 +248,32 @@ describe("TelegramChannel", () => {
 			await channel.updateOrSendMessage("123", "s1", "status", undefined, "ACK");
 
 			expect(sentCallback).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("single-user authorization", () => {
+		it("does not register auth middleware when TELEGRAM_USER_ID is unset", () => {
+			new TelegramChannel(makeConfig());
+			expect(mockUse).not.toHaveBeenCalled();
+		});
+
+		it("allows only the configured Telegram user ID", async () => {
+			new TelegramChannel(makeConfig({ telegramUserId: 123 }));
+			const middleware = mockUse.mock.calls[0]![0] as (
+				ctx: { from?: { id: number }; reply: ReturnType<typeof vi.fn> },
+				next: ReturnType<typeof vi.fn>,
+			) => Promise<void>;
+			const next = vi.fn();
+			const reply = vi.fn();
+
+			await middleware({ from: { id: 123 }, reply }, next);
+			expect(next).toHaveBeenCalledOnce();
+			expect(reply).not.toHaveBeenCalled();
+
+			next.mockClear();
+			await middleware({ from: { id: 456 }, reply }, next);
+			expect(next).not.toHaveBeenCalled();
+			expect(reply).toHaveBeenCalledWith("Sorry, you are not authorized to use this bot.");
 		});
 	});
 });

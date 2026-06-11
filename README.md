@@ -89,7 +89,7 @@ TELEGRAM_BOT_TOKEN=your_bot_token
 MINI_CLAW_WORKSPACE=/path/to/workspace    # Default: ~/mini-claw-workspace
 MINI_CLAW_SESSION_DIR=~/.mini-claw/sessions
 PI_THINKING_LEVEL=low                      # low | medium | high
-ALLOWED_USERS=123456,789012                # Comma-separated user IDs
+TELEGRAM_USER_ID=123456                    # Single authorized Telegram user ID
 
 # Rate limiting & timeouts (milliseconds)
 RATE_LIMIT_COOLDOWN_MS=5000                # Default: 5 seconds

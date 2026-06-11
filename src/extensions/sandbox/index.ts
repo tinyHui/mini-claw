@@ -9,7 +9,7 @@
  *   initialized once at bot startup (see `src/index.ts`). Unsupported platforms or init
  *   failures skip sandboxing; the agent still runs without these extensions.
  * - Per Telegram session, `pi-runner` builds an isolated cwd under
- *   `MINI_CLAW_SESSION_DIR/<userId>_<sessionId>/` and passes `createSandboxExtensionFactory(isolatedWorkspace)`
+ *   `MINI_CLAW_SESSION_DIR/<sessionId>/` and passes `createSandboxExtensionFactory(isolatedWorkspace)`
  *   into `DefaultResourceLoader.extensionFactories`.
  *
  * **What gets enforced**

@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.pnpm-store/
 
 # Build output
 dist/
@@ -27,9 +28,10 @@ sessions/
 coverage/
 
 
-# Pi related files
+# Agent related files
 .workspace/
 .sessions/
+miniclaw.db
 
 # reference project
 hermes-agent/

@@ -1,10 +1,9 @@
 // MessageCallback is invoked by a Channel implementation whenever a new user
 // message arrives. channelId is the routing identifier (e.g. Telegram chat ID).
-// userId identifies who sent the message. The orchestration layer (index.ts)
-// resolves the user's session and drives the full AI workflow.
+// The orchestration layer (index.ts) resolves the single local session and
+// drives the full AI workflow.
 export type MessageCallback = (
 	channelId: string,
-	userId: string,
 	platformMsgId: string,
 	content: string,
 ) => Promise<void>;

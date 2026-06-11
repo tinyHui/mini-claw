@@ -118,60 +118,51 @@ describe("config", () => {
 			expect(config.thinkingLevel).toBe("high");
 		});
 
-		it("should return empty allowedUsers array when ALLOWED_USERS is not set", async () => {
+		it("should leave telegramUserId undefined when TELEGRAM_USER_ID is not set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
-			delete process.env.ALLOWED_USERS;
+			delete process.env.TELEGRAM_USER_ID;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
-			expect(config.allowedUsers).toEqual([]);
+			expect(config.telegramUserId).toBeUndefined();
 		});
 
-		it("should return empty allowedUsers array when ALLOWED_USERS is empty", async () => {
+		it("should leave telegramUserId undefined when TELEGRAM_USER_ID is empty", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
-			process.env.ALLOWED_USERS = "";
+			process.env.TELEGRAM_USER_ID = "";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
-			expect(config.allowedUsers).toEqual([]);
+			expect(config.telegramUserId).toBeUndefined();
 		});
 
-		it("should parse single ALLOWED_USERS value", async () => {
+		it("should parse TELEGRAM_USER_ID", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
-			process.env.ALLOWED_USERS = "123456";
+			process.env.TELEGRAM_USER_ID = "123456";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
-			expect(config.allowedUsers).toEqual([123456]);
+			expect(config.telegramUserId).toBe(123456);
 		});
 
-		it("should parse multiple ALLOWED_USERS values", async () => {
+		it("should trim TELEGRAM_USER_ID", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
-			process.env.ALLOWED_USERS = "123,456,789";
+			process.env.TELEGRAM_USER_ID = " 123456 ";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
-			expect(config.allowedUsers).toEqual([123, 456, 789]);
+			expect(config.telegramUserId).toBe(123456);
 		});
 
-		it("should trim whitespace from ALLOWED_USERS values", async () => {
+		it("should reject invalid TELEGRAM_USER_ID", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
-			process.env.ALLOWED_USERS = " 123 , 456 , 789 ";
+			process.env.TELEGRAM_USER_ID = "123,456";
 			const { loadConfig } = await import("./config.js");
-			const config = loadConfig();
-			expect(config.allowedUsers).toEqual([123, 456, 789]);
-		});
-
-		it("should filter out invalid (NaN) ALLOWED_USERS values", async () => {
-			process.env.TELEGRAM_BOT_TOKEN = "test-token";
-			process.env.ALLOWED_USERS = "123,invalid,456,abc,789";
-			const { loadConfig } = await import("./config.js");
-			const config = loadConfig();
-			expect(config.allowedUsers).toEqual([123, 456, 789]);
+			expect(() => loadConfig()).toThrow("TELEGRAM_USER_ID must be a numeric Telegram user ID.");
 		});
 
 		it("should handle negative user IDs", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
-			process.env.ALLOWED_USERS = "-123,456,-789";
+			process.env.TELEGRAM_USER_ID = "-123";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
-			expect(config.allowedUsers).toEqual([-123, 456, -789]);
+			expect(config.telegramUserId).toBe(-123);
 		});
 
 		it("should return all expected config properties", async () => {
@@ -179,7 +170,7 @@ describe("config", () => {
 			process.env.MINI_CLAW_WORKSPACE = "/workspace";
 			process.env.MINI_CLAW_SESSION_DIR = "/sessions";
 			process.env.PI_THINKING_LEVEL = "high";
-			process.env.ALLOWED_USERS = "123,456";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.LOG_LEVEL = "debug";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -190,7 +181,7 @@ describe("config", () => {
 				sessionDir: "/sessions",
 				logLevel: "debug",
 				thinkingLevel: "high",
-				allowedUsers: [123, 456],
+				telegramUserId: 123,
 				rateLimitCooldownMs: 5000,
 				piTimeoutMs: 300000,
 				shellTimeoutMs: 60000,

@@ -4,7 +4,7 @@ import type { Config } from "./config.js";
 const mockMkdir = vi.fn();
 const mockReadSoulPromptFile = vi.fn();
 
-const listeners: Array<(event: any) => void> = [];
+const listeners: Array<(event: unknown) => void> = [];
 const mockPrompt = vi.fn();
 const mockFollowUp = vi.fn();
 const mockAbort = vi.fn();
@@ -64,7 +64,6 @@ describe("pi-runner", () => {
 		sessionDir: "/sessions",
 		logLevel: "info",
 		thinkingLevel: "low",
-		allowedUsers: [],
 		rateLimitCooldownMs: 5000,
 		piTimeoutMs: 300000,
 		shellTimeoutMs: 60000,
@@ -79,12 +78,12 @@ describe("pi-runner", () => {
 		mockMkdir.mockResolvedValue(undefined);
 		mockReadSoulPromptFile.mockResolvedValue("");
 		mockResolveSessionHistoryPath.mockResolvedValue(
-			"/sessions/20260322T120000_1_bf84f08c.jsonl",
+			"/sessions/20260322T120000_bf84f08c.jsonl",
 		);
 		mockGetAvailable.mockResolvedValue([{ provider: "anthropic", id: "x" }]);
 		mockCreateAgentSession.mockResolvedValue({
 			session: {
-				subscribe: (listener: (event: any) => void) => {
+					subscribe: (listener: (event: unknown) => void) => {
 					listeners.push(listener);
 					return () => {};
 				},
@@ -129,7 +128,6 @@ describe("pi-runner", () => {
 		const result = await runPiWithStreaming(
 			config,
 			"ch-1",
-			"user-1",
 			"sess-1",
 			"hi",
 			"/workspace",
@@ -150,8 +148,8 @@ describe("pi-runner", () => {
 		);
 		mockFollowUp.mockResolvedValue(undefined);
 
-		const first = runPiWithStreaming(config, "ch-1", "user-1", "sess-1", "first", "/workspace", () => {});
-		const second = runPiWithStreaming(config, "ch-1", "user-1", "sess-1", "second", "/workspace", () => {});
+		const first = runPiWithStreaming(config, "ch-1", "sess-1", "first", "/workspace", () => {});
+		const second = runPiWithStreaming(config, "ch-1", "sess-1", "second", "/workspace", () => {});
 
 		await vi.waitFor(() => {
 			expect(mockFollowUp).toHaveBeenCalledWith("second");
@@ -200,7 +198,6 @@ describe("pi-runner", () => {
 		const result = await runPiWithStreaming(
 			config,
 			"ch-1",
-			"user-1",
 			"sess-1",
 			"list files",
 			"/workspace",
@@ -233,7 +230,6 @@ describe("pi-runner", () => {
 		const result = await runPiWithStreaming(
 			config,
 			"ch-1",
-			"user-1",
 			"sess-1",
 			"list files",
 			"/workspace",
@@ -253,7 +249,6 @@ describe("pi-runner", () => {
 		const result = await runPiWithStreaming(
 			config,
 			"ch-1",
-			"user-1",
 			"sess-1",
 			"hi",
 			"/workspace",

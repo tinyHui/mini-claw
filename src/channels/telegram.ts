@@ -183,10 +183,10 @@ export class TelegramChannel implements Channel {
 	}
 
 	private setupHandlers(): void {
-		if (this.config.allowedUsers.length > 0) {
+		if (this.config.telegramUserId !== undefined) {
 			this.bot.use(async (ctx, next) => {
 				const uid = ctx.from?.id;
-				if (uid && this.config.allowedUsers.includes(uid)) {
+				if (uid === this.config.telegramUserId) {
 					await next();
 				} else {
 					await ctx.reply("Sorry, you are not authorized to use this bot.");
@@ -201,12 +201,10 @@ export class TelegramChannel implements Channel {
 		this.bot.api.setMyCommands(commands).catch(() => {});
 
 		this.bot.command("session", async (ctx) => {
-			const userId = String(ctx.from!.id);
-			const session = resetSession(userId);
+			const session = resetSession();
 			await withLogContext(
 				{
 					operation: "session_reset",
-					userId,
 					channelId: String(ctx.chat.id),
 					sessionId: session.id,
 				},
@@ -218,9 +216,8 @@ export class TelegramChannel implements Channel {
 		});
 
 		this.bot.command("status", async (ctx) => {
-			const userId = String(ctx.from!.id);
 			const cwd = await getWorkspace(String(ctx.chat.id));
-			const session = ensureSession(userId);
+			const session = ensureSession();
 			await ctx.reply(
 				`Status:\n- Chat ID: ${ctx.chat.id}\n- Workspace: ${formatPath(cwd)}\n- Session: ${session.id.slice(0, 8)}…`,
 			);
@@ -245,7 +242,6 @@ export class TelegramChannel implements Channel {
 			if (this.messageCallback) {
 				await this.messageCallback(
 					String(ctx.chat.id),
-					String(ctx.from!.id),
 					String(ctx.message.message_id),
 					text,
 				);

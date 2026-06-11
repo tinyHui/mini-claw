@@ -8,7 +8,7 @@ export interface Config {
 	sessionDir: string;
 	logLevel: string;
 	thinkingLevel: "low" | "medium" | "high";
-	allowedUsers: number[];
+	telegramUserId?: number;
 	rateLimitCooldownMs: number;
 	piTimeoutMs: number;
 	shellTimeoutMs: number;
@@ -39,11 +39,13 @@ export function loadConfig(): Config {
 		| "medium"
 		| "high";
 
-	const allowedUsers = process.env.ALLOWED_USERS?.trim()
-		? process.env.ALLOWED_USERS.split(",")
-				.map((id) => parseInt(id.trim(), 10))
-				.filter((id) => !Number.isNaN(id))
-		: [];
+	const telegramUserIdRaw = process.env.TELEGRAM_USER_ID?.trim();
+	if (telegramUserIdRaw && !/^-?\d+$/.test(telegramUserIdRaw)) {
+		throw new Error("TELEGRAM_USER_ID must be a numeric Telegram user ID.");
+	}
+	const telegramUserId = telegramUserIdRaw
+		? parseInt(telegramUserIdRaw, 10)
+		: undefined;
 
 	// Rate limiting: default 5 seconds cooldown
 	const rateLimitCooldownMs = parseInt(
@@ -70,7 +72,7 @@ export function loadConfig(): Config {
 		sessionDir,
 		logLevel,
 		thinkingLevel,
-		allowedUsers,
+		telegramUserId,
 		rateLimitCooldownMs,
 		piTimeoutMs,
 		shellTimeoutMs,

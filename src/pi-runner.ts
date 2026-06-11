@@ -85,14 +85,13 @@ class PiSdkRunner {
 
 	async runWithStreaming(
 		channelId: string,
-		userId: string,
 		sessionId: string,
 		prompt: string,
 		workspace: string,
 		onActivity: ActivityCallback,
 	): Promise<RunResult> {
 		const runtime = this.getRuntime(channelId);
-		const session = await this.getOrCreateSession(runtime, userId, sessionId, workspace);
+		const session = await this.getOrCreateSession(runtime, sessionId, workspace);
 		const resultPromise = new Promise<RunResult>((resolve, reject) => {
 			const request: PendingRequest = {
 				startedAt: Date.now(),
@@ -161,7 +160,6 @@ class PiSdkRunner {
 
 	private async getOrCreateSession(
 		runtime: ChannelRuntime,
-		userId: string,
 		sessionId: string,
 		workspace: string,
 	): Promise<AgentSession> {
@@ -170,7 +168,7 @@ class PiSdkRunner {
 		}
 
 		if (!runtime.sessionReady) {
-			runtime.sessionReady = this.createSession(userId, sessionId, workspace);
+			runtime.sessionReady = this.createSession(sessionId, workspace);
 		}
 		const session = await runtime.sessionReady.finally(() => {
 			runtime.sessionReady = undefined;
@@ -193,18 +191,16 @@ class PiSdkRunner {
 		return session;
 	}
 
-	private async createSession(userId: string, sessionId: string, workspace: string): Promise<AgentSession> {
-		const isolatedWorkspace = join(this.config.sessionDir, `${userId}_${sessionId}`);
+	private async createSession(sessionId: string, workspace: string): Promise<AgentSession> {
+		const isolatedWorkspace = join(this.config.sessionDir, sessionId);
 		await mkdir(isolatedWorkspace, { recursive: true });
 		logger.info("Created isolated session workspace", {
-			userId,
 			sessionId,
 			isolatedWorkspace,
 		});
 
 		const sessionManager = await this.getSessionManager(
 			isolatedWorkspace,
-			userId,
 			sessionId,
 		);
 
@@ -235,18 +231,15 @@ class PiSdkRunner {
 
 	private async getSessionManager(
 		workspace: string,
-		userId: string,
 		sessionId: string,
 	): Promise<SessionManager> {
 		await mkdir(this.config.sessionDir, { recursive: true });
 		const sessionFilePath = await resolveSessionHistoryPath(
 			this.config.sessionDir,
-			userId,
 			sessionId,
 		);
 		logger.info("Session history file", {
 			sessionFilePath,
-			userId,
 			sessionId,
 		});
 		// create() sets cwd to the isolated workspace; setSessionFile() applies our
@@ -376,7 +369,6 @@ function getRunner(config: Config): PiSdkRunner {
 export async function runPi(
 	config: Config,
 	channelId: string,
-	userId: string,
 	sessionId: string,
 	prompt: string,
 	workspace: string,
@@ -384,7 +376,6 @@ export async function runPi(
 ): Promise<RunResult> {
 	return getRunner(config).runWithStreaming(
 		channelId,
-		userId,
 		sessionId,
 		prompt,
 		workspace,
@@ -395,7 +386,6 @@ export async function runPi(
 export async function runPiWithStreaming(
 	config: Config,
 	channelId: string,
-	userId: string,
 	sessionId: string,
 	prompt: string,
 	workspace: string,
@@ -404,7 +394,6 @@ export async function runPiWithStreaming(
 ): Promise<RunResult> {
 	return getRunner(config).runWithStreaming(
 		channelId,
-		userId,
 		sessionId,
 		prompt,
 		workspace,

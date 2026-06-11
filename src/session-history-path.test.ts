@@ -26,14 +26,13 @@ describe("session-history-path", () => {
 	});
 
 	describe("buildNewSessionHistoryFilename", () => {
-		it("builds YYYY-MM-DDTHH:MM:SS_<user>_<8>.jsonl", () => {
+		it("builds YYYY-MM-DDTHH:MM:SS_<8>.jsonl", () => {
 			const d = new Date(2026, 2, 22, 21, 29, 6);
 			const name = buildNewSessionHistoryFilename(
-				"12345",
 				"bf84f08c-8a5e-41ff-881d-8d5591c1581b",
 				d,
 			);
-			expect(name).toBe(`${formatSessionFileTimestamp(d)}_12345_bf84f08c.jsonl`);
+			expect(name).toBe(`${formatSessionFileTimestamp(d)}_bf84f08c.jsonl`);
 		});
 	});
 
@@ -46,27 +45,25 @@ describe("session-history-path", () => {
 			const fixed = new Date(2026, 2, 22, 10, 0, 0);
 			const p = await resolveSessionHistoryPath(
 				dir,
-				"999",
 				"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 				fixed,
 			);
 			expect(p).toBe(
 				join(
 					dir,
-					`${formatSessionFileTimestamp(fixed)}_999_aaaaaaaa.jsonl`,
+					`${formatSessionFileTimestamp(fixed)}_aaaaaaaa.jsonl`,
 				),
 			);
 		});
 
-		it("reuses existing file matching user and session short id", async () => {
+		it("reuses existing file matching session short id", async () => {
 			dir = join(tmpdir(), `mc-sess-${Date.now()}-2`);
 			await mkdir(dir, { recursive: true });
-			const existing = join(dir, "2026-03-21T08:00:00_111_abcdef12.jsonl");
+			const existing = join(dir, "2026-03-21T08:00:00_abcdef12.jsonl");
 			await writeFile(existing, `${JSON.stringify({ type: "session" })}\n`, "utf8");
 
 			const p = await resolveSessionHistoryPath(
 				dir,
-				"111",
 				"abcdef12-0000-0000-0000-000000000000",
 				new Date(),
 			);
@@ -76,15 +73,14 @@ describe("session-history-path", () => {
 		it("picks most recently modified when multiple matches exist", async () => {
 			dir = join(tmpdir(), `mc-sess-${Date.now()}-3`);
 			await mkdir(dir, { recursive: true });
-			const older = join(dir, "2026-03-20T08:00:00_222_deadbeef.jsonl");
-			const newer = join(dir, "2026-03-22T08:00:00_222_deadbeef.jsonl");
+			const older = join(dir, "2026-03-20T08:00:00_deadbeef.jsonl");
+			const newer = join(dir, "2026-03-22T08:00:00_deadbeef.jsonl");
 			const stubLine = `${JSON.stringify({ type: "session" })}\n`;
 			await writeFile(older, stubLine, "utf8");
 			await writeFile(newer, stubLine, "utf8");
 
 			const p = await resolveSessionHistoryPath(
 				dir,
-				"222",
 				"deadbeef-0000-0000-0000-000000000000",
 				new Date(),
 			);

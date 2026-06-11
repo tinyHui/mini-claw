@@ -1,49 +1,48 @@
 {
-	"name": "mini-claw",
-	"version": "0.1.0",
-	"description": "Lightweight Telegram bot for persistent AI conversations using Pi",
-	"type": "module",
-	"main": "dist/index.js",
-	"scripts": {
-		"dev": "tsx watch src/index.ts",
-		"build": "tsc",
-		"start": "node dist/index.js",
-		"typecheck": "tsc --noEmit",
-		"lint": "eslint src/",
-		"test": "vitest run",
-		"test:watch": "vitest",
-		"test:coverage": "vitest run --coverage"
-	},
-	"dependencies": {
-		"@carderne/sandbox-runtime": "^0.0.43",
-		"@grammyjs/files": "^1.2.0",
-		"@grammyjs/types": "^3.25.0",
-		"@mariozechner/pi-coding-agent": "^0.61.1",
-		"better-sqlite3": "^12.8.0",
-		"dotenv": "^17.3.1",
-		"grammy": "^1.41.1",
-		"perfect-logger": "^3.0.0",
-		"telegramify-markdown": "^1.3.2"
-	},
-	"devDependencies": {
-		"@eslint/js": "^10.0.1",
-		"@types/better-sqlite3": "^7.6.13",
-		"@types/node": "^25.5.0",
-		"@vitest/coverage-v8": "^4.1.0",
-		"eslint": "^10.0.3",
-		"globals": "^17.4.0",
-		"memfs": "^4.56.11",
-		"tsx": "^4.19.2",
-		"typescript": "^5.7.3",
-		"typescript-eslint": "^8.57.0",
-		"vitest": "^4.1.0"
-	},
-	"engines": {
-		"node": ">=22"
-	},
-	"pnpm": {
-		"onlyBuiltDependencies": [
-			"better-sqlite3"
-		]
-	}
+  "name": "mini-claw",
+  "version": "0.1.0",
+  "description": "Lightweight Telegram bot for persistent AI conversations using Pi",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@carderne/sandbox-runtime": "^0.0.43",
+    "@grammyjs/files": "^1.2.0",
+    "@grammyjs/types": "^3.25.0",
+    "@mariozechner/pi-coding-agent": "^0.61.1",
+    "better-sqlite3": "^12.8.0",
+    "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.2",
+    "grammy": "^1.41.1",
+    "perfect-logger": "^3.0.0",
+    "telegramify-markdown": "^1.3.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.5.0",
+    "@vitest/coverage-v8": "^4.1.0",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^10.0.3",
+    "globals": "^17.4.0",
+    "memfs": "^4.56.11",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.57.0",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

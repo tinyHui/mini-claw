@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "./db.js";
+import { messages, type MessageRow } from "./db/schema.js";
 
 // 'pending'   – user message waiting to be picked up by the AI processor
 // 'processed' – user message that has been answered
@@ -12,14 +14,10 @@ import { getDb } from "./db.js";
 export type MessageStatus = "pending" | "processed" | "ACK";
 export type MessageRole = "user" | "assistant" | "system";
 
-export interface Message {
-	id: string;
-	sessionId: string;
-	timeStamp: string;
+export type Message = MessageRow & {
 	role: MessageRole;
-	content: string;
 	status: MessageStatus;
-}
+};
 
 export type InsertMessageData = Omit<Message, "id" | "timeStamp" | "status"> & {
 	id?: string;
@@ -38,10 +36,7 @@ export function insertMessage(data: InsertMessageData): Message {
 		status: data.status ?? "pending",
 	};
 
-	db.prepare(`
-		INSERT INTO messages (id, sessionId, timeStamp, role, content, status)
-		VALUES (@id, @sessionId, @timeStamp, @role, @content, @status)
-	`).run(message);
+	db.insert(messages).values(message).run();
 
 	return message;
 }
@@ -66,9 +61,10 @@ export function updateOrInsertAssistantMessage(
 			content,
 		});
 	} else if (status === "processed" && platformMsgId !== undefined) {
-		db.prepare(
-			"UPDATE messages SET content = ?, status = 'processed' WHERE id = ? AND sessionId = ?",
-		).run(content, platformMsgId, sessionId);
+		db.update(messages)
+			.set({ content, status: "processed" })
+			.where(and(eq(messages.id, platformMsgId), eq(messages.sessionId, sessionId)))
+			.run();
 	} else {
 		insertMessage({
 			sessionId,
@@ -83,15 +79,23 @@ export function getUnprocessedUserMessages(sessionId?: string): Message[] {
 	const db = getDb();
 	if (sessionId) {
 		return db
-			.prepare(
-				"SELECT * FROM messages WHERE role = 'user' AND status = 'pending' AND sessionId = ? ORDER BY timeStamp ASC",
+			.select()
+			.from(messages)
+			.where(
+				and(
+					eq(messages.role, "user"),
+					eq(messages.status, "pending"),
+					eq(messages.sessionId, sessionId),
+				),
 			)
-			.all(sessionId) as Message[];
+			.orderBy(asc(messages.timeStamp))
+			.all() as Message[];
 	}
 	return db
-		.prepare(
-			"SELECT * FROM messages WHERE role = 'user' AND status = 'pending' ORDER BY timeStamp ASC",
-		)
+		.select()
+		.from(messages)
+		.where(and(eq(messages.role, "user"), eq(messages.status, "pending")))
+		.orderBy(asc(messages.timeStamp))
 		.all() as Message[];
 }
 
@@ -100,7 +104,8 @@ export function markMessageProcessed(
 	sessionId: string,
 ): void {
 	const db = getDb();
-	db.prepare(
-		"UPDATE messages SET status = 'processed' WHERE id = ? AND sessionId = ?",
-	).run(messageId, sessionId);
+	db.update(messages)
+		.set({ status: "processed" })
+		.where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
+		.run();
 }

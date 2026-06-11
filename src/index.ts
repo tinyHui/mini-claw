@@ -10,7 +10,7 @@ import {
 	updateOrInsertAssistantMessage,
 } from "./message-repository.js";
 import { type ActivityUpdate, checkPiAuth, runPiWithStreaming } from "./pi-runner.js";
-import { ensureSoulPromptFile, getSoulPromptPath } from "./pi-utils.js";
+import { ensureSoulPromptFile } from "./pi-utils.js";
 import { ensureSession } from "./session-repository.js";
 import { getWorkspace } from "./workspace.js";
 
@@ -78,16 +78,15 @@ async function main() {
 		);
 	});
 
-	channel.onMessage(async (channelId, userId, platformMsgId, content) => {
+	channel.onMessage(async (channelId, platformMsgId, content) => {
 		await withLogContext(
 			{
 				channelId,
-				userId,
 				platformMsgId,
 				operation: "incoming_message",
 			},
 			async () => {
-				const session = ensureSession(userId);
+				const session = ensureSession();
 				const sessionId = session.id;
 				await withLogContext({ sessionId }, async () => {
 					const userMsg = insertMessage({ sessionId, id: platformMsgId, role: "user", content });
@@ -127,7 +126,6 @@ async function main() {
 						const result = await runPiWithStreaming(
 							config,
 							channelId,
-							userId,
 							sessionId,
 							content,
 							workspace,
