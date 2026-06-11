@@ -30,3 +30,6 @@ coverage/
 # Pi related files
 .workspace/
 .sessions/
+
+# reference project
+hermes-agent/
