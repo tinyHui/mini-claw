@@ -10,13 +10,16 @@ import {
 	getSession,
 	resetSession,
 } from "./session-repository.js";
+import { createMigratedDatabase } from "./test-database.js";
 
 describe("session-repository", () => {
 	let dir: string;
 
 	beforeEach(async () => {
 		dir = await mkdtemp(join(tmpdir(), "mini-claw-db-"));
-		initializeDatabase(dir);
+		const dbPath = join(dir, "miniclaw.db");
+		createMigratedDatabase(dbPath);
+		initializeDatabase(dbPath);
 	});
 
 	afterEach(async () => {

@@ -1,4 +1,4 @@
-import { access, readFile, writeFile, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 export function getSoulPromptPath(workspace: string): string {
@@ -8,15 +8,6 @@ export function getSoulPromptPath(workspace: string): string {
 export async function ensureSoulPromptFile(workspace: string): Promise<void> {
 	const soulPath = getSoulPromptPath(workspace);
 
-	// Try to ensure the file exists
-	try {
-		await access(soulPath);
-	} catch {
-		// If missing, create as empty file
-		await writeFile(soulPath, "", { flag: "wx" }).catch(() => {});
-	}
-
-	// Check again (it should exist at this point), and verify it's non-empty
 	let fileStat;
 	try {
 		fileStat = await stat(soulPath);

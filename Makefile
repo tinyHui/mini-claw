@@ -33,7 +33,9 @@ help:
 	@echo "  1. make install"
 	@echo "  2. make login"
 	@echo "  3. cp .env.example .env && edit .env"
-	@echo "  4. make dev"
+	@echo "  4. Create SOUL.md in your MINI_CLAW_WORKSPACE"
+	@echo "  5. pnpm db:migrate"
+	@echo "  6. make dev"
 
 # Install dependencies
 install:
@@ -46,7 +48,9 @@ install:
 	@echo "Done! Next steps:"
 	@echo "  1. Run 'make login' to authenticate with Claude/ChatGPT"
 	@echo "  2. Copy .env.example to .env and add your Telegram bot token"
-	@echo "  3. Run 'make dev' to start the bot"
+	@echo "  3. Create SOUL.md in your MINI_CLAW_WORKSPACE"
+	@echo "  4. Run 'pnpm db:migrate'"
+	@echo "  5. Run 'make dev' to start the bot"
 
 # Login to AI provider
 login:

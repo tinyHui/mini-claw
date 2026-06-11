@@ -45,7 +45,7 @@ async function main() {
 		await ensureSoulPromptFile(config.workspace);
 		logger.info("SOUL.md file found, booting Pi...");
 
-		initializeDatabase(config.workspace);
+		initializeDatabase();
 
 		const piOk = await checkPiAuth();
 		if (!piOk) {

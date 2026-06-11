@@ -11,6 +11,7 @@ import {
 	updateOrInsertAssistantMessage,
 } from "./message-repository.js";
 import { createSession } from "./session-repository.js";
+import { createMigratedDatabase } from "./test-database.js";
 
 describe("message-repository", () => {
 	let dir: string;
@@ -18,7 +19,9 @@ describe("message-repository", () => {
 
 	beforeEach(async () => {
 		dir = await mkdtemp(join(tmpdir(), "mini-claw-db-"));
-		initializeDatabase(dir);
+		const dbPath = join(dir, "miniclaw.db");
+		createMigratedDatabase(dbPath);
+		initializeDatabase(dbPath);
 		sessionId = createSession({ model: "default", thinkingLevel: "low" }).id;
 	});
 

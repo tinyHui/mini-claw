@@ -51,6 +51,10 @@ pi /login
 cp .env.example .env
 # Edit .env with your TELEGRAM_BOT_TOKEN
 
+# Prepare workspace prompt and database
+$EDITOR ~/mini-claw-workspace/SOUL.md
+pnpm db:migrate
+
 # Start the bot
 pnpm start
 ```

@@ -32,6 +32,8 @@ coverage/
 .workspace/
 .sessions/
 miniclaw.db
+miniclaw.db-shm
+miniclaw.db-wal
 
 # reference project
 hermes-agent/

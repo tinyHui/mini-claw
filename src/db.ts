@@ -1,8 +1,7 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import Database, { type Database as DatabaseType } from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "./db/schema.js";
 import { logger, withLogContext } from "./logger.js";
 
@@ -11,11 +10,20 @@ export type AppDatabase = BetterSQLite3Database<typeof schema>;
 let sqlite: DatabaseType | null = null;
 let db: AppDatabase | null = null;
 
+export function getDefaultDatabasePath(): string {
+	return join(process.cwd(), "miniclaw.db");
+}
+
 function assertCompatibleSchema(database: DatabaseType): void {
 	const table = database
 		.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'")
 		.get();
-	if (!table) return;
+	if (!table) {
+		throw new Error(
+			"Database is missing required table 'sessions'. " +
+				"Run 'pnpm db:migrate' from the project root before starting Mini-Claw.",
+		);
+	}
 
 	const columns = database
 		.prepare("PRAGMA table_info(sessions)")
@@ -44,36 +52,34 @@ function assertCompatibleSchema(database: DatabaseType): void {
 	if (!migrationsTable) {
 		throw new Error(
 			"Existing miniclaw.db was not created by Drizzle migrations. " +
-				"Move or archive miniclaw.db before starting Mini-Claw with the Drizzle schema.",
+				"Run 'pnpm db:migrate' from the project root before starting Mini-Claw.",
 		);
 	}
 }
 
-export function initializeDatabase(workspaceFolder: string): AppDatabase {
+export function initializeDatabase(dbPath = getDefaultDatabasePath()): AppDatabase {
 	return withLogContext({ operation: "database_init" }, () => {
-		const dbPath = join(workspaceFolder, "miniclaw.db");
-		const existed = existsSync(dbPath);
-
-		if (existed) {
-			logger.info(`Database already exists at ${dbPath}`);
-		} else {
-			logger.warn(`Database not found at ${dbPath}, creating and initializing`);
-			mkdirSync(workspaceFolder, { recursive: true });
+		if (!existsSync(dbPath)) {
+			throw new Error(
+				`Database file not found at ${dbPath}. ` +
+					"Run 'pnpm db:migrate' from the project root before starting Mini-Claw.",
+			);
 		}
 
-		sqlite = new Database(dbPath);
-		sqlite.pragma("journal_mode = WAL");
-		sqlite.pragma("foreign_keys = ON");
-		assertCompatibleSchema(sqlite);
-		db = drizzle(sqlite, { schema });
-		migrate(db, { migrationsFolder: "drizzle" });
-
-		if (existed) {
+		logger.info(`Opening database at ${dbPath}`);
+		try {
+			sqlite = new Database(dbPath);
+			sqlite.pragma("journal_mode = WAL");
+			sqlite.pragma("foreign_keys = ON");
+			assertCompatibleSchema(sqlite);
+			db = drizzle(sqlite, { schema });
 			return db;
+		} catch (error) {
+			sqlite?.close();
+			sqlite = null;
+			db = null;
+			throw error;
 		}
-
-		logger.info("Database initialized");
-		return db;
 	});
 }
 
