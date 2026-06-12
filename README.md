@@ -92,6 +92,8 @@ TELEGRAM_BOT_TOKEN=your_bot_token
 # Optional
 MINI_CLAW_WORKSPACE=/path/to/workspace    # Default: ~/mini-claw-workspace
 MINI_CLAW_SESSION_DIR=~/.mini-claw/sessions
+MINI_CLAW_APP_ROOT=/path/to/mini-claw      # Default: current process cwd
+MINI_CLAW_CRON_DIR=/path/to/mini-claw/cron # Default: $MINI_CLAW_APP_ROOT/cron
 PI_THINKING_LEVEL=low                      # low | medium | high
 TELEGRAM_USER_ID=123456                    # Single authorized Telegram user ID
 
@@ -128,7 +130,7 @@ mini-claw-v0.1.0.tar.gz
 
 The tarball includes the runtime files needed on the Pi, including
 `package.json`, `pnpm-lock.yaml`, `Makefile`, `.env.example`, `dist/`,
-`drizzle/`, Drizzle config/schema files, and `scripts/pi/`.
+`cron/`, `skills/`, `drizzle/`, Drizzle config/schema files, and `scripts/pi/`.
 
 You can create the same package locally:
 
@@ -214,10 +216,13 @@ systemctl --user enable mini-claw
 ### pm2
 
 ```bash
-pnpm build
-pm2 start dist/index.js --name mini-claw
+pnpm pm2:start
 pm2 save
 ```
+
+This starts both `mini-claw` and `mini-claw-cron` from `ecosystem.config.cjs`.
+Cron jobs are created by normal Telegram requests that the agent handles with
+the `cron-job-authoring` skill; there are no `/cron` Telegram commands.
 
 ### tmux
 
@@ -260,7 +265,7 @@ pnpm test:coverage
 - [X] OpenClaw alike SOUL.md updated
 - [ ] OpenClaw alike USER.md, but support multiple of them and link the relative one with each session
 - [ ] Support cross session memory
-- [ ] Integrate with codex
-- [ ] Support scheduled jobs
+- [x] Integrate with codex
+- [x] Support scheduled jobs
 - [ ] Install skills to make research work
 - [ ] Support enriched files

@@ -1,4 +1,4 @@
-.PHONY: install login dev start build status clean help test test-watch test-coverage lint typecheck check release-package pi-bootstrap pi-deploy pi-status pw-install pw-dev pw-build
+.PHONY: install login dev start build status clean help test test-watch test-coverage lint typecheck check release-package pi-bootstrap pi-deploy pi-status pm2-start pm2-restart pm2-logs pw-install pw-dev pw-build
 
 # Default target
 help:
@@ -16,6 +16,7 @@ help:
 	@echo "  make start      Start bot in production mode"
 	@echo "  make build      Compile TypeScript"
 	@echo "  make status     Check Pi auth status"
+	@echo "  make pm2-start  Start Mini-Claw and cron under pm2"
 	@echo "  make clean      Remove build artifacts"
 	@echo "  make release-package  Build local release tarball"
 	@echo ""
@@ -76,6 +77,15 @@ start:
 	pnpm build
 	pnpm start
 
+pm2-start:
+	pnpm pm2:start
+
+pm2-restart:
+	pnpm pm2:restart
+
+pm2-logs:
+	pnpm pm2:logs
+
 # Build TypeScript
 build:
 	pnpm build
@@ -121,9 +131,12 @@ release-package:
 	rm -rf "$$PACKAGE_DIR" "$$ARTIFACT" ; \
 	mkdir -p "$$PACKAGE_DIR/src/db" ; \
 	cp -R dist "$$PACKAGE_DIR/dist" ; \
+	cp -R cron "$$PACKAGE_DIR/cron" ; \
+	rm -rf "$$PACKAGE_DIR/cron/output" ; \
+	cp -R skills "$$PACKAGE_DIR/skills" ; \
 	cp -R drizzle "$$PACKAGE_DIR/drizzle" ; \
 	cp -R scripts "$$PACKAGE_DIR/scripts" ; \
-	cp package.json pnpm-lock.yaml pnpm-workspace.yaml Makefile README.md .env.example drizzle.config.ts tsconfig.json "$$PACKAGE_DIR/" ; \
+	cp package.json pnpm-lock.yaml pnpm-workspace.yaml Makefile README.md .env.example drizzle.config.ts tsconfig.json ecosystem.config.cjs "$$PACKAGE_DIR/" ; \
 	cp src/db/schema.ts "$$PACKAGE_DIR/src/db/schema.ts" ; \
 	find "$$PACKAGE_DIR/dist" -name "*.test.*" -delete ; \
 	find "$$PACKAGE_DIR/dist" -name "test-database.*" -delete ; \

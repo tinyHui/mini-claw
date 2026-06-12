@@ -113,9 +113,10 @@ function matchesAllowedPath(
  */
 export function createSandboxExtensionFactory(
 	workspacePath: string,
+	extraAllowedPaths: string[] = [],
 ): ExtensionFactory {
-	const sessionConfig = buildSessionSandboxConfig(workspacePath);
-	const allowedPaths = [workspacePath, "/tmp"];
+	const allowedPaths = [workspacePath, "/tmp", ...extraAllowedPaths];
+	const sessionConfig = buildSessionSandboxConfig(workspacePath, extraAllowedPaths);
 
 	return (pi) => {
 		const bashTool = createBashTool(workspacePath, {

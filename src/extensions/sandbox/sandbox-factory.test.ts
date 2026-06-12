@@ -64,8 +64,8 @@ describe("sandbox-factory", () => {
 	});
 
 	describe("tool_call path enforcement", () => {
-		function setupToolCallHandler(workspacePath: string) {
-			const factory = createSandboxExtensionFactory(workspacePath);
+		function setupToolCallHandler(workspacePath: string, extraAllowedPaths: string[] = []) {
+			const factory = createSandboxExtensionFactory(workspacePath, extraAllowedPaths);
 			const mockPi = {
 				registerTool: vi.fn(),
 				on: vi.fn(),
@@ -116,6 +116,19 @@ describe("sandbox-factory", () => {
 				toolName: "read",
 				toolCallId: "tc1",
 				input: { path: "/tmp/some-file.txt" },
+			});
+
+			expect(result).toBeUndefined();
+		});
+
+		it("allows writes inside configured extra paths", async () => {
+			const handler = setupToolCallHandler("/workspace/user1_sess1", ["/app/cron"]);
+
+			const result = await handler({
+				type: "tool_call",
+				toolName: "write",
+				toolCallId: "tc1",
+				input: { path: "/app/cron/jobs/digest.mjs" },
 			});
 
 			expect(result).toBeUndefined();

@@ -15,9 +15,11 @@ import {
 	createSandboxExtensionFactory,
 	isSandboxReady,
 } from "./extensions/sandbox/index.js";
+import { createCronGeneratorExtensionFactory } from "./extensions/cron/cron-generator-extension.js";
 import { logger } from "./logger.js";
 import { readSoulPromptFile } from "./pi-utils.js";
 import { resolveSessionHistoryPath } from "./session-history-path.js";
+import { mergeRepoSkills } from "./skills.js";
 
 interface RunResult {
 	output: string;
@@ -206,9 +208,12 @@ class PiSdkRunner {
 		);
 
 		const soulPrompt = await readSoulPromptFile(workspace);
-		const extensionFactories = isSandboxReady()
-			? [createSandboxExtensionFactory(isolatedWorkspace)]
-			: [];
+		const extensionFactories = [
+			createCronGeneratorExtensionFactory({ config: this.config }),
+			...(isSandboxReady()
+				? [createSandboxExtensionFactory(isolatedWorkspace, [this.config.cronDir])]
+				: []),
+		];
 
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: isolatedWorkspace,
@@ -216,6 +221,7 @@ class PiSdkRunner {
 			noExtensions: !isSandboxReady(),
 			extensionFactories,
 			systemPromptOverride: () => soulPrompt,
+			skillsOverride: (base) => mergeRepoSkills(base, this.config.appRoot),
 		});
 		await resourceLoader.reload();
 

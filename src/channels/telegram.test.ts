@@ -77,6 +77,8 @@ import { TelegramChannel, toTelegramMarkdown } from "./telegram.js";
 function makeConfig(overrides: Partial<Config> = {}): Config {
 	return {
 		telegramToken: "fake-token",
+		appRoot: "/app",
+		cronDir: "/app/cron",
 		workspace: "/tmp/ws",
 		sessionDir: "/tmp/sessions",
 		logLevel: "debug",

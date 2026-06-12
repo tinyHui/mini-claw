@@ -79,7 +79,9 @@ export function buildGlobalSandboxConfig(): SandboxRuntimeConfig {
  */
 export function buildSessionSandboxConfig(
 	workspacePath: string,
+	extraAllowedPaths: string[] = [],
 ): Partial<SandboxRuntimeConfig> {
+	const allowedPaths = [workspacePath, "/tmp", ...extraAllowedPaths];
 	return {
 		filesystem: {
 			// Deny read access to important user/system folders on Linux and macOS
@@ -100,8 +102,8 @@ export function buildSessionSandboxConfig(
 				"/dev",               // devices
 				"/Volumes",           // macOS mount points
 			],
-			allowRead: [workspacePath, "/tmp"],
-			allowWrite: [workspacePath, "/tmp"],
+			allowRead: allowedPaths,
+			allowWrite: allowedPaths,
 			denyWrite: SENSITIVE_WRITE_PATTERNS,
 		},
 	};

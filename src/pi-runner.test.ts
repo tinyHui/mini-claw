@@ -26,6 +26,14 @@ vi.mock("./extensions/sandbox/index.js", () => ({
 	createSandboxExtensionFactory: vi.fn(() => vi.fn()),
 }));
 
+vi.mock("./extensions/cron/cron-generator-extension.js", () => ({
+	createCronGeneratorExtensionFactory: vi.fn(() => vi.fn()),
+}));
+
+vi.mock("./skills.js", () => ({
+	mergeRepoSkills: vi.fn((base: unknown) => base),
+}));
+
 vi.mock("./logger.js", () => ({
 	logger: {
 		debug: vi.fn(),
@@ -63,6 +71,8 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
 describe("pi-runner", () => {
 	const config: Config = {
 		telegramToken: "token",
+		appRoot: "/app",
+		cronDir: "/app/cron",
 		workspace: "/workspace",
 		sessionDir: "/sessions",
 		logLevel: "info",

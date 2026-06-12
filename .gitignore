@@ -20,6 +20,7 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+cron/output/
 
 # Sessions (local data)
 sessions/
@@ -35,6 +36,11 @@ miniclaw.db
 miniclaw.db-shm
 miniclaw.db-wal
 *.tar.gz
+
+cron/**/*.yaml
+cron/**/*.cron
+cron/**/*.mjs
+!cron/scheduler.mjs
 
 # reference project
 hermes-agent/

@@ -52,6 +52,13 @@ describe("sandbox-config", () => {
 			]);
 		});
 
+		it("allows configured extra paths", () => {
+			const config = buildSessionSandboxConfig("/workspace", ["/app/cron"]);
+
+			expect(config.filesystem?.allowRead).toContain("/app/cron");
+			expect(config.filesystem?.allowWrite).toContain("/app/cron");
+		});
+
 		it("denies read access to user home directories", () => {
 			const config = buildSessionSandboxConfig("/workspace");
 

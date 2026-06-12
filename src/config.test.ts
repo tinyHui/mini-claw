@@ -177,6 +177,8 @@ describe("config", () => {
 
 			expect(config).toEqual({
 				telegramToken: "test-token",
+				appRoot: process.cwd(),
+				cronDir: `${process.cwd()}/cron`,
 				workspace: "/workspace",
 				sessionDir: "/sessions",
 				logLevel: "debug",
@@ -203,6 +205,25 @@ describe("config", () => {
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
 			expect(config.logLevel).toBe("debug");
+		});
+
+		it("should use custom app root and cron directory", async () => {
+			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.MINI_CLAW_APP_ROOT = "/apps/mini-claw";
+			process.env.MINI_CLAW_CRON_DIR = "/custom/cron";
+			const { loadConfig } = await import("./config.js");
+			const config = loadConfig();
+			expect(config.appRoot).toBe("/apps/mini-claw");
+			expect(config.cronDir).toBe("/custom/cron");
+		});
+
+		it("should default cron directory under app root", async () => {
+			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.MINI_CLAW_APP_ROOT = "/apps/mini-claw";
+			delete process.env.MINI_CLAW_CRON_DIR;
+			const { loadConfig } = await import("./config.js");
+			const config = loadConfig();
+			expect(config.cronDir).toBe("/apps/mini-claw/cron");
 		});
 
 		it("should return cached config on subsequent calls", async () => {

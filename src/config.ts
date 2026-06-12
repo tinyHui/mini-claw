@@ -1,9 +1,11 @@
 import "dotenv/config";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export interface Config {
 	telegramToken: string;
+	appRoot: string;
+	cronDir: string;
 	workspace: string;
 	sessionDir: string;
 	logLevel: string;
@@ -25,10 +27,15 @@ export function loadConfig(): Config {
 	}
 
 	const home = homedir();
+	const appRoot = resolve(process.env.MINI_CLAW_APP_ROOT?.trim() || process.cwd());
 
 	const workspace =
 		process.env.MINI_CLAW_WORKSPACE?.trim() ||
 		join(home, "mini-claw-workspace");
+
+	const cronDir =
+		process.env.MINI_CLAW_CRON_DIR?.trim() ||
+		join(appRoot, "cron");
 
 	const sessionDir =
 		process.env.MINI_CLAW_SESSION_DIR?.trim() ||
@@ -68,6 +75,8 @@ export function loadConfig(): Config {
 
 	cachedConfig = {
 		telegramToken: token,
+		appRoot,
+		cronDir,
 		workspace,
 		sessionDir,
 		logLevel,
