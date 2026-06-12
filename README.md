@@ -79,9 +79,9 @@ make test       # Run tests
 | `/cd <path>`   | Change working directory           |
 | `/home`        | Go to home directory               |
 | `/shell <cmd>` | Run shell command directly         |
-| `/session`     | List and manage sessions           |
 | `/new`         | Start fresh session (archives old) |
 | `/status`      | Show bot status                    |
+| `/cron-restart` | Reload the pm2 cron scheduler     |
 
 ## Configuration
 

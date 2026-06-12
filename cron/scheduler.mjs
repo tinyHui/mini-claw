@@ -11,7 +11,21 @@ const logLevel = process.env.LOG_LEVEL || "info";
 
 initializeLogger(logLevel, logWorkspace);
 
+logger.info("Initializing cron scheduler", {
+	operation: "cron_boot",
+	appRoot,
+	cronDir,
+	logWorkspace,
+	logLevel,
+});
+
 const scheduler = await startCronScheduler({ cronDir });
+
+logger.info("Cron scheduler ready", {
+	operation: "cron_ready",
+	cronJobCount: scheduler.jobs.length,
+	capabilityCount: scheduler.capabilities.length,
+});
 
 const shutdown = async () => {
 	logger.info("Stopping cron scheduler", { operation: "cron_shutdown" });

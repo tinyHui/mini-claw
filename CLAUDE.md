@@ -151,8 +151,9 @@ SESSION_TITLE_TIMEOUT_MS=10000          # Default: 10 seconds
 
 | Command    | Description                                                        |
 | ---------- | ------------------------------------------------------------------ |
-| `/session` | Start a new session (resets conversation context without history)  |
+| `/new`     | Start a new session (resets conversation context without history)  |
 | `/status`  | Show chat ID, workspace, and session state                         |
+| `/cron-restart` | Reload the pm2 cron scheduler                                |
 
 ## Authentication Flow
 

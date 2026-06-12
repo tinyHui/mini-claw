@@ -2,6 +2,7 @@ import { Bot, Context, GrammyError } from "grammy";
 import telegramifyMarkdown from "telegramify-markdown";
 import type { Channel, DeliveryStatus, MessageCallback, MessageSentCallback } from "./channel.js";
 import type { Config } from "../config.js";
+import { restartCronPm2 } from "../cron/pm2.js";
 import { logger, withLogContext } from "../logger.js";
 import { checkRateLimit } from "../rate-limiter.js";
 import { ensureSession, resetSession } from "../session-repository.js";
@@ -36,6 +37,10 @@ function splitMessage(text: string): string[] {
 	}
 
 	return chunks;
+}
+
+function isCommandText(text: string, command: string): boolean {
+	return text === `/${command}` || text.startsWith(`/${command}@`);
 }
 
 export class TelegramChannel implements Channel {
@@ -195,12 +200,13 @@ export class TelegramChannel implements Channel {
 		}
 
 		const commands = [
-			{ command: "session", description: "Start a new session" },
+			{ command: "new", description: "Start a new session" },
 			{ command: "status", description: "Show current session info" },
+			{ command: "cron_restart", description: "Reload cron scheduler" },
 		];
 		this.bot.api.setMyCommands(commands).catch(() => {});
 
-		this.bot.command("session", async (ctx) => {
+		this.bot.command("new", async (ctx) => {
 			const session = resetSession();
 			await withLogContext(
 				{
@@ -215,6 +221,10 @@ export class TelegramChannel implements Channel {
 			await ctx.reply("New session started.");
 		});
 
+		this.bot.command("cron_restart", async (ctx) => {
+			await this.restartCronFromCommand(String(ctx.chat.id), ctx.reply.bind(ctx));
+		});
+
 		this.bot.command("status", async (ctx) => {
 			const cwd = await getWorkspace(String(ctx.chat.id));
 			const session = ensureSession();
@@ -225,6 +235,10 @@ export class TelegramChannel implements Channel {
 
 		this.bot.on("message:text", async (ctx) => {
 			const text = ctx.message.text;
+			if (isCommandText(text, "cron-restart")) {
+				await this.restartCronFromCommand(String(ctx.chat.id), ctx.reply.bind(ctx));
+				return;
+			}
 			if (text.startsWith("/")) return;
 
 			const rateLimit = checkRateLimit(
@@ -262,6 +276,33 @@ export class TelegramChannel implements Channel {
 		], async (ctx) => {
 			await ctx.reply("This message type is not supported yet.");
 		});
+	}
+
+	private async restartCronFromCommand(
+		channelId: string,
+		reply: (text: string) => Promise<unknown>,
+	): Promise<void> {
+		await withLogContext(
+			{
+				operation: "cron_restart",
+				channelId,
+			},
+			async () => {
+				const result = await restartCronPm2({ appRoot: this.config.appRoot });
+				if (result.ok) {
+					logger.info("Restarted cron process via pm2");
+					await reply(`Cron scheduler restarted (${result.processName}).`);
+				} else {
+					const errorMessage = result.error ?? (result.stderr || "unknown error");
+					logger.warn("Failed to restart cron process via pm2", {
+						error: errorMessage,
+					});
+					await reply(
+						`Failed to restart cron scheduler (${result.processName}): ${errorMessage}`,
+					);
+				}
+			},
+		);
 	}
 }
 

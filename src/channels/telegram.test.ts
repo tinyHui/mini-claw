@@ -10,6 +10,9 @@ const {
 	mockUse,
 	mockCommand,
 	mockOn,
+	mockRestartCronPm2,
+	mockEnsureSession,
+	mockResetSession,
 	MockGrammyError,
 } = vi.hoisted(() => {
 	class MockGrammyError extends Error {
@@ -32,6 +35,9 @@ const {
 		mockUse: vi.fn(),
 		mockCommand: vi.fn(),
 		mockOn: vi.fn(),
+		mockRestartCronPm2: vi.fn(),
+		mockEnsureSession: vi.fn(),
+		mockResetSession: vi.fn(),
 		MockGrammyError,
 	};
 });
@@ -69,8 +75,14 @@ vi.mock("telegramify-markdown", () => ({
 }));
 
 vi.mock("../rate-limiter.js", () => ({ checkRateLimit: vi.fn() }));
-vi.mock("../session-repository.js", () => ({ ensureSession: vi.fn(), resetSession: vi.fn() }));
+vi.mock("../session-repository.js", () => ({
+	ensureSession: mockEnsureSession,
+	resetSession: mockResetSession,
+}));
 vi.mock("../workspace.js", () => ({ getWorkspace: vi.fn(), formatPath: vi.fn((p: string) => p) }));
+vi.mock("../cron/pm2.js", () => ({
+	restartCronPm2: (...args: unknown[]) => mockRestartCronPm2(...args),
+}));
 
 import { TelegramChannel, toTelegramMarkdown } from "./telegram.js";
 
@@ -110,6 +122,15 @@ describe("TelegramChannel", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockSetMyCommands.mockResolvedValue(undefined);
+		mockResetSession.mockReturnValue({ id: "session-123" });
+		mockEnsureSession.mockReturnValue({ id: "session-123" });
+		mockRestartCronPm2.mockResolvedValue({
+			ok: true,
+			processName: "mini-claw-cron",
+			command: "pm2 restart mini-claw-cron",
+			stdout: "",
+			stderr: "",
+		});
 		channel = new TelegramChannel(makeConfig());
 		sentCallback = vi.fn<MessageSentCallback>();
 		channel.onMessageSent(sentCallback);
@@ -276,6 +297,76 @@ describe("TelegramChannel", () => {
 			await middleware({ from: { id: 456 }, reply }, next);
 			expect(next).not.toHaveBeenCalled();
 			expect(reply).toHaveBeenCalledWith("Sorry, you are not authorized to use this bot.");
+		});
+	});
+
+	describe("commands", () => {
+		function commandHandler(name: string) {
+			return mockCommand.mock.calls.find((call: unknown[]) => call[0] === name)?.[1] as
+				| ((ctx: { chat: { id: number }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
+				| undefined;
+		}
+
+		function textHandler() {
+			return mockOn.mock.calls.find((call: unknown[]) => call[0] === "message:text")?.[1] as
+				| ((ctx: { chat: { id: number }; message: { text: string; message_id: number }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
+				| undefined;
+		}
+
+		it("registers /new, /status, and /cron_restart commands", () => {
+			expect(mockSetMyCommands).toHaveBeenCalledWith([
+				{ command: "new", description: "Start a new session" },
+				{ command: "status", description: "Show current session info" },
+				{ command: "cron_restart", description: "Reload cron scheduler" },
+			]);
+			expect(commandHandler("new")).toBeTypeOf("function");
+			expect(commandHandler("session")).toBeUndefined();
+			expect(commandHandler("cron_restart")).toBeTypeOf("function");
+		});
+
+		it("starts a new session with /new", async () => {
+			const reply = vi.fn().mockResolvedValue(undefined);
+			await commandHandler("new")?.({ chat: { id: 123 }, reply });
+
+			expect(mockResetSession).toHaveBeenCalledOnce();
+			expect(reply).toHaveBeenCalledWith("New session started.");
+		});
+
+		it("restarts cron with /cron_restart", async () => {
+			const reply = vi.fn().mockResolvedValue(undefined);
+			await commandHandler("cron_restart")?.({ chat: { id: 123 }, reply });
+
+			expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
+			expect(reply).toHaveBeenCalledWith("Cron scheduler restarted (mini-claw-cron).");
+		});
+
+		it("also handles /cron-restart text alias", async () => {
+			const reply = vi.fn().mockResolvedValue(undefined);
+			await textHandler()?.({
+				chat: { id: 123 },
+				message: { text: "/cron-restart", message_id: 10 },
+				reply,
+			});
+
+			expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
+			expect(reply).toHaveBeenCalledWith("Cron scheduler restarted (mini-claw-cron).");
+		});
+
+		it("reports cron restart failure", async () => {
+			mockRestartCronPm2.mockResolvedValueOnce({
+				ok: false,
+				processName: "mini-claw-cron",
+				command: "pm2 restart mini-claw-cron",
+				stdout: "",
+				stderr: "not found",
+				error: "not found",
+			});
+			const reply = vi.fn().mockResolvedValue(undefined);
+			await commandHandler("cron_restart")?.({ chat: { id: 123 }, reply });
+
+			expect(reply).toHaveBeenCalledWith(
+				"Failed to restart cron scheduler (mini-claw-cron): not found",
+			);
 		});
 	});
 });

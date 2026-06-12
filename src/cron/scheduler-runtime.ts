@@ -1,4 +1,5 @@
 import Bree from "bree";
+import { scanCapabilities, type CapabilitySummary } from "./capabilities.js";
 import { scanCronJobs, type CronJobDefinition } from "./scanner.js";
 import { logger } from "../logger.js";
 
@@ -10,16 +11,25 @@ export interface SchedulerOptions {
 export interface SchedulerBuildResult {
 	bree: Bree;
 	jobs: CronJobDefinition[];
+	capabilities: CapabilitySummary[];
 }
 
 export async function buildCronScheduler(
 	options: SchedulerOptions,
 ): Promise<SchedulerBuildResult> {
-	const result = await scanCronJobs(options.cronDir);
-	for (const diagnostic of result.diagnostics) {
+	const [jobResult, capabilityResult] = await Promise.all([
+		scanCronJobs(options.cronDir),
+		scanCapabilities(options.cronDir),
+	]);
+	const diagnostics = [
+		...jobResult.diagnostics.map((diagnostic) => ({ ...diagnostic, operation: "cron_job_scan" })),
+		...capabilityResult.diagnostics.map((diagnostic) => ({ ...diagnostic, operation: "cron_capability_scan" })),
+	];
+
+	for (const diagnostic of diagnostics) {
 		const context = {
 			file: diagnostic.file,
-			operation: "cron_scan",
+			operation: diagnostic.operation,
 		};
 		if (diagnostic.level === "error") {
 			logger.error(diagnostic.message, undefined, context);
@@ -28,10 +38,19 @@ export async function buildCronScheduler(
 		}
 	}
 
+	logger.info("Cron scheduler scan completed", {
+		operation: "cron_scan",
+		cronDir: options.cronDir,
+		cronJobCount: jobResult.jobs.length,
+		capabilityCount: capabilityResult.capabilities.length,
+		diagnosticErrorCount: diagnostics.filter((diagnostic) => diagnostic.level === "error").length,
+		diagnosticWarningCount: diagnostics.filter((diagnostic) => diagnostic.level === "warn").length,
+	});
+
 	const bree = new Bree({
 		root: false,
 		logger: console,
-		jobs: result.jobs.map((job) => ({
+		jobs: jobResult.jobs.map((job) => ({
 			name: job.name,
 			path: job.path,
 			cron: job.cron,
@@ -39,14 +58,16 @@ export async function buildCronScheduler(
 		})),
 	});
 
-	return { bree, jobs: result.jobs };
+	return { bree, jobs: jobResult.jobs, capabilities: capabilityResult.capabilities };
 }
 
 export async function startCronScheduler(options: SchedulerOptions): Promise<SchedulerBuildResult> {
 	const built = await buildCronScheduler(options);
 	logger.info("Starting cron scheduler", {
 		operation: "cron_start",
+		cronDir: options.cronDir,
 		cronJobCount: built.jobs.length,
+		capabilityCount: built.capabilities.length,
 	});
 	await built.bree.start();
 	return built;
