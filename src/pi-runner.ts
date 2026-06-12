@@ -7,6 +7,7 @@ import {
 	ModelRegistry,
 	createAgentSession,
 	DefaultResourceLoader,
+	getAgentDir,
 	SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import type { Config } from "./config.js";
@@ -71,7 +72,7 @@ class PiSdkRunner {
 
 	constructor(private readonly config: Config) {
 		this.authStorage = AuthStorage.create();
-		this.modelRegistry = new ModelRegistry(this.authStorage);
+		this.modelRegistry = ModelRegistry.create(this.authStorage);
 	}
 
 	async checkAuth(): Promise<boolean> {
@@ -211,6 +212,7 @@ class PiSdkRunner {
 
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: isolatedWorkspace,
+			agentDir: getAgentDir(),
 			noExtensions: !isSandboxReady(),
 			extensionFactories,
 			systemPromptOverride: () => soulPrompt,
@@ -403,7 +405,7 @@ export async function runPiWithStreaming(
 
 export async function checkPiAuth(): Promise<boolean> {
 	const authStorage = AuthStorage.create();
-	const modelRegistry = new ModelRegistry(authStorage);
+	const modelRegistry = ModelRegistry.create(authStorage);
 	const available = await modelRegistry.getAvailable();
 	return available.length > 0;
 }

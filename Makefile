@@ -1,4 +1,4 @@
-.PHONY: install login dev start build status clean help test test-watch test-coverage lint typecheck check pw-install pw-dev pw-build
+.PHONY: install login dev start build status clean help test test-watch test-coverage lint typecheck check release-package pi-bootstrap pi-deploy pi-status pw-install pw-dev pw-build
 
 # Default target
 help:
@@ -17,6 +17,7 @@ help:
 	@echo "  make build      Compile TypeScript"
 	@echo "  make status     Check Pi auth status"
 	@echo "  make clean      Remove build artifacts"
+	@echo "  make release-package  Build local release tarball"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make test       Run tests"
@@ -36,6 +37,11 @@ help:
 	@echo "  4. Create SOUL.md in your MINI_CLAW_WORKSPACE"
 	@echo "  5. pnpm db:migrate"
 	@echo "  6. make dev"
+	@echo ""
+	@echo "Raspberry Pi Deployment:"
+	@echo "  make pi-bootstrap  Install Pi host prerequisites"
+	@echo "  make pi-deploy     Download latest GitHub release and restart service"
+	@echo "  make pi-status     Show systemd service status"
 
 # Install dependencies
 install:
@@ -104,6 +110,36 @@ typecheck:
 
 # Run all checks
 check: lint typecheck test
+
+# Build local release tarball matching GitHub Actions packaging.
+release-package:
+	rm -rf dist
+	pnpm build
+	@VERSION="$${VERSION:-v$$(node -p 'require("./package.json").version')}" ; \
+	PACKAGE_DIR="mini-claw-$$VERSION" ; \
+	ARTIFACT="mini-claw-$$VERSION.tar.gz" ; \
+	rm -rf "$$PACKAGE_DIR" "$$ARTIFACT" ; \
+	mkdir -p "$$PACKAGE_DIR/src/db" ; \
+	cp -R dist "$$PACKAGE_DIR/dist" ; \
+	cp -R drizzle "$$PACKAGE_DIR/drizzle" ; \
+	cp -R scripts "$$PACKAGE_DIR/scripts" ; \
+	cp package.json pnpm-lock.yaml pnpm-workspace.yaml Makefile README.md .env.example drizzle.config.ts tsconfig.json "$$PACKAGE_DIR/" ; \
+	cp src/db/schema.ts "$$PACKAGE_DIR/src/db/schema.ts" ; \
+	find "$$PACKAGE_DIR/dist" -name "*.test.*" -delete ; \
+	find "$$PACKAGE_DIR/dist" -name "test-database.*" -delete ; \
+	tar -czf "$$ARTIFACT" "$$PACKAGE_DIR" ; \
+	rm -rf "$$PACKAGE_DIR" ; \
+	echo "Created $$ARTIFACT"
+
+# Raspberry Pi deployment helpers
+pi-bootstrap:
+	scripts/pi/bootstrap.sh
+
+pi-deploy:
+	scripts/pi/deploy.sh
+
+pi-status:
+	systemctl --user status mini-claw
 
 # Clean build artifacts
 clean:

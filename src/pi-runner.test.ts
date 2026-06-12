@@ -43,12 +43,15 @@ vi.mock("./session-history-path.js", () => ({
 
 vi.mock("@mariozechner/pi-coding-agent", () => ({
 	AuthStorage: { create: vi.fn(() => ({})) },
-	ModelRegistry: class {
-		getAvailable = mockGetAvailable;
+	ModelRegistry: {
+		create: vi.fn(() => ({
+			getAvailable: mockGetAvailable,
+		})),
 	},
 	DefaultResourceLoader: class {
 		reload = vi.fn().mockResolvedValue(undefined);
 	},
+	getAgentDir: vi.fn(() => "/home/test/.pi/agent"),
 	SessionManager: {
 		create: vi.fn(() => ({
 			setSessionFile: mockSetSessionFile,

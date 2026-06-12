@@ -1,0 +1,16 @@
+[Unit]
+Description=Mini-Claw Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__APP_DIR__
+Environment=HOME=__HOME__
+EnvironmentFile=__ENV_FILE__
+ExecStart=__NODE_PATH__ __APP_DIR__/dist/index.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

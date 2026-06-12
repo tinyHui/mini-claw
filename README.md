@@ -106,7 +106,104 @@ BRAVE_API_KEY=your_brave_api_key           # For Pi web search skill
 
 ## Deployment
 
-### systemd (Linux)
+Mini-Claw is designed to run on a Raspberry Pi from GitHub release tarballs.
+The deployment flow keeps secrets and local state outside each release directory,
+so redeploying does not overwrite `.env`, Pi auth, the database, sessions, or
+the workspace.
+
+### Release Tags
+
+Push a version tag to build and publish a GitHub Release artifact:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The GitHub Action builds `dist/`, runs checks, and publishes:
+
+```text
+mini-claw-v0.1.0.tar.gz
+```
+
+The tarball includes the runtime files needed on the Pi, including
+`package.json`, `pnpm-lock.yaml`, `Makefile`, `.env.example`, `dist/`,
+`drizzle/`, Drizzle config/schema files, and `scripts/pi/`.
+
+You can create the same package locally:
+
+```bash
+make release-package
+```
+
+### First Raspberry Pi Setup
+
+On a fresh Raspberry Pi, download the deploy script from the public repo and run
+it. Omit `--version` to install the latest GitHub Release.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tinyHui/mini-claw/main/scripts/pi/deploy.sh -o deploy-mini-claw.sh
+chmod +x deploy-mini-claw.sh
+./deploy-mini-claw.sh --version v0.1.0
+```
+
+The deploy script:
+
+- installs host dependencies with `apt` when missing
+- installs `nvm`, Node.js 22, and pnpm
+- installs `@mariozechner/pi-coding-agent` when `pi` is missing
+- downloads and extracts the release under `~/mini-claw/releases/<version>`
+- updates `~/mini-claw/current`
+- installs dependencies and runs `pnpm db:migrate`
+- installs and restarts the `mini-claw` user `systemd` service
+
+These parts stay manual:
+
+```bash
+$EDITOR ~/mini-claw/.env
+pi /login
+$EDITOR ~/mini-claw-workspace/SOUL.md
+```
+
+At minimum, set `TELEGRAM_BOT_TOKEN` in `~/mini-claw/.env`. The Pi login is not
+automated because it requires interactive provider authentication.
+
+### Redeploy
+
+For future releases, run the same script with the new tag:
+
+```bash
+~/deploy-mini-claw.sh --version v0.1.1
+```
+
+Or deploy the latest GitHub Release:
+
+```bash
+~/deploy-mini-claw.sh
+```
+
+The script is idempotent: already installed tools are reused, existing `.env`
+is preserved, and the service is updated to point at the new release.
+
+### Service Management
+
+Mini-Claw runs as a user-level `systemd` service:
+
+```bash
+systemctl --user status mini-claw
+systemctl --user restart mini-claw
+journalctl --user -u mini-claw -f
+```
+
+If services do not start after reboot, enable user lingering:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+### Manual systemd install from a clone
+
+For a cloned checkout on Linux, the older Makefile helper still works:
 
 ```bash
 make install-service
@@ -146,41 +243,12 @@ pnpm test
 pnpm test:coverage
 ```
 
-### Test Coverage
-
-| Module       | Coverage |
-| ------------ | -------- |
-| config.ts    | 100%     |
-| sessions.ts  | 100%     |
-| workspace.ts | 100%     |
-| pi-runner.ts | 100%     |
-
 ## Tech Stack
 
 - **Runtime**: Node.js 22+, TypeScript
 - **Telegram**: [grammY](https://grammy.dev/)
 - **AI**: [Pi coding agent](https://github.com/badlogic/pi-mono)
 - **Testing**: Vitest
-
-## Troubleshooting
-
-### "Pi not authenticated"
-
-```bash
-pi /login
-```
-
-### "Session file locked"
-
-Check for running Pi processes:
-
-```bash
-ps aux | grep pi
-```
-
-## License
-
-MIT
 
 ## TODO
 
@@ -191,7 +259,8 @@ MIT
 - [X] Sandbox restriction for all bash execution
 - [X] OpenClaw alike SOUL.md updated
 - [ ] OpenClaw alike USER.md, but support multiple of them and link the relative one with each session
-- [ ] Connect with mem0 to support cross session memory
+- [ ] Support cross session memory
+- [ ] Integrate with codex
 - [ ] Support scheduled jobs
 - [ ] Install skills to make research work
 - [ ] Support enriched files
