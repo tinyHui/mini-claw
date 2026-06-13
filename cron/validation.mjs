@@ -1,23 +1,12 @@
 import { parse } from "yaml";
 
-export interface ValidationDiagnostic {
-	level: "error" | "warn";
-	message: string;
-	file?: string;
-}
-
-export interface CapabilityManifest {
-	name: string;
-	description: string;
-	input_schema: unknown;
-	output_schema: unknown;
-}
-
 const JOB_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const CAPABILITY_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const CRON_FIELD_RE = /^[A-Za-z0-9*?,/#LW-]+$/;
+const DESCRIPTION_RE = /^\s*\/\/\s*description:\s*(\S.*)$/im;
 
-export function validateJobName(name: string): string[] {
-	const errors: string[] = [];
+export function validateJobName(name) {
+	const errors = [];
 	if (!name.trim()) {
 		errors.push("Job name is required.");
 		return errors;
@@ -33,13 +22,28 @@ export function validateJobName(name: string): string[] {
 	return errors;
 }
 
-export function validateCronExpression(expression: string): string[] {
-	const trimmed = expression.trim();
-	const errors: string[] = [];
-	if (!trimmed) {
-		return ["Cron expression is required."];
+export function validateCapabilitySlug(slug) {
+	const errors = [];
+	if (!slug.trim()) {
+		errors.push("Capability slug is required.");
+		return errors;
 	}
+	if (!CAPABILITY_SLUG_RE.test(slug)) {
+		errors.push(
+			"Capability slug must start with a letter or number and contain only letters, numbers, dashes, or underscores.",
+		);
+	}
+	if (slug === "." || slug === ".." || slug.includes("/") || slug.includes("\\")) {
+		errors.push("Capability slug must be a single safe path component.");
+	}
+	return errors;
+}
 
+export function validateCronExpression(expression) {
+	const trimmed = expression.trim();
+	if (!trimmed) return ["Cron expression is required."];
+
+	const errors = [];
 	const fields = trimmed.split(/\s+/);
 	if (fields.length !== 5 && fields.length !== 6) {
 		errors.push("Cron expression must have 5 fields, or 6 fields when seconds are used.");
@@ -54,16 +58,18 @@ export function validateCronExpression(expression: string): string[] {
 	return errors;
 }
 
-export function hasCronSeconds(expression: string): boolean {
+export function hasCronSeconds(expression) {
 	return expression.trim().split(/\s+/).length === 6;
 }
 
-export function parseCapabilityManifest(
-	content: string,
-	file?: string,
-): { manifest?: CapabilityManifest; diagnostics: ValidationDiagnostic[] } {
-	const diagnostics: ValidationDiagnostic[] = [];
-	let parsed: unknown;
+export function extractJobDescription(content) {
+	const match = DESCRIPTION_RE.exec(content);
+	return match?.[1]?.trim();
+}
+
+export function parseCapabilityManifest(content, file) {
+	const diagnostics = [];
+	let parsed;
 	try {
 		parsed = parse(content);
 	} catch (error) {
@@ -84,9 +90,8 @@ export function parseCapabilityManifest(
 		return { diagnostics };
 	}
 
-	const record = parsed as Record<string, unknown>;
 	for (const key of ["name", "description", "input_schema", "output_schema"]) {
-		if (!(key in record)) {
+		if (!(key in parsed)) {
 			diagnostics.push({
 				level: "error",
 				file,
@@ -95,7 +100,7 @@ export function parseCapabilityManifest(
 		}
 	}
 
-	if (typeof record.name !== "string" || !record.name.trim()) {
+	if (typeof parsed.name !== "string" || !parsed.name.trim()) {
 		diagnostics.push({
 			level: "error",
 			file,
@@ -103,7 +108,7 @@ export function parseCapabilityManifest(
 		});
 	}
 
-	if (typeof record.description !== "string" || !record.description.trim()) {
+	if (typeof parsed.description !== "string" || !parsed.description.trim()) {
 		diagnostics.push({
 			level: "error",
 			file,
@@ -117,10 +122,10 @@ export function parseCapabilityManifest(
 
 	return {
 		manifest: {
-			name: record.name as string,
-			description: record.description as string,
-			input_schema: record.input_schema,
-			output_schema: record.output_schema,
+			name: parsed.name,
+			description: parsed.description,
+			input_schema: parsed.input_schema,
+			output_schema: parsed.output_schema,
 		},
 		diagnostics,
 	};

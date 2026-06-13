@@ -1,4 +1,4 @@
-import { primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const sessions = sqliteTable("sessions", {
 	id: text("id").primaryKey().notNull(),
@@ -24,7 +24,34 @@ export const messages = sqliteTable(
 	}),
 );
 
+export const cronJobs = sqliteTable("cron_jobs", {
+	name: text("name").primaryKey().notNull(),
+	description: text("description").notNull(),
+	cronExpression: text("cronExpression").notNull(),
+	hasSeconds: integer("hasSeconds").notNull().default(0),
+	scriptPath: text("scriptPath").notNull(),
+	schedulePath: text("schedulePath").notNull(),
+	contentHash: text("contentHash").notNull(),
+	validatedAt: text("validatedAt").notNull(),
+});
+
+export const cronCapabilities = sqliteTable("cron_capabilities", {
+	slug: text("slug").primaryKey().notNull(),
+	name: text("name").notNull(),
+	description: text("description").notNull(),
+	manifestPath: text("manifestPath").notNull(),
+	entrypointPath: text("entrypointPath").notNull(),
+	inputSchemaJson: text("inputSchemaJson").notNull(),
+	outputSchemaJson: text("outputSchemaJson").notNull(),
+	contentHash: text("contentHash").notNull(),
+	validatedAt: text("validatedAt").notNull(),
+});
+
 export type SessionRow = typeof sessions.$inferSelect;
 export type NewSessionRow = typeof sessions.$inferInsert;
 export type MessageRow = typeof messages.$inferSelect;
 export type NewMessageRow = typeof messages.$inferInsert;
+export type CronJobRow = typeof cronJobs.$inferSelect;
+export type NewCronJobRow = typeof cronJobs.$inferInsert;
+export type CronCapabilityRow = typeof cronCapabilities.$inferSelect;
+export type NewCronCapabilityRow = typeof cronCapabilities.$inferInsert;

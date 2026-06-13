@@ -29,7 +29,13 @@ describe("db", () => {
 			.all() as { name: string }[];
 		sqlite.close();
 		expect(tables.map((table) => table.name)).toEqual(
-			expect.arrayContaining(["__drizzle_migrations", "sessions", "messages"]),
+			expect.arrayContaining([
+				"__drizzle_migrations",
+				"sessions",
+				"messages",
+				"cron_jobs",
+				"cron_capabilities",
+			]),
 		);
 	});
 

@@ -1,10 +1,18 @@
-import { mkdir, readdir, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { execFile } from "node:child_process";
+import { mkdir } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { promisify } from "node:util";
 import { Codex, type FileChangeItem, type ThreadItem } from "@openai/codex-sdk";
-import { scanCapabilities } from "./capabilities.js";
+import { getSqlite } from "../db.js";
 import { restartCronPm2, type Pm2RestartResult } from "./pm2.js";
-import { getCronJobsDir, scanCronJobs } from "./scanner.js";
-import type { ValidationDiagnostic } from "./validation.js";
+
+const execFileAsync = promisify(execFile);
+
+export interface ValidationDiagnostic {
+	level: "error" | "warn";
+	message: string;
+	file?: string;
+}
 
 export interface GenerateCronArtifactsInput {
 	request: string;
@@ -39,6 +47,46 @@ interface CodexLike {
 export interface GenerateCronArtifactsOptions {
 	codex?: CodexLike;
 	restartCronProcess?: (appRoot: string) => Promise<Pm2RestartResult>;
+	readCronContext?: () => CronRegistryContext;
+	runValidator?: (input: {
+		appRoot: string;
+		cronDir: string;
+	}) => Promise<ValidatorProcessResult>;
+}
+
+export interface CronRegistryJob {
+	name: string;
+	description: string;
+	cronExpression: string;
+}
+
+export interface CronRegistryCapability {
+	slug: string;
+	name: string;
+	description: string;
+	inputSchemaJson: string;
+	outputSchemaJson: string;
+}
+
+export interface CronRegistryContext {
+	jobs: CronRegistryJob[];
+	capabilities: CronRegistryCapability[];
+}
+
+export interface ValidatorProcessResult {
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+}
+
+interface ValidatorJson {
+	ok?: boolean;
+	errors?: ValidationDiagnostic[];
+	warnings?: ValidationDiagnostic[];
+	counts?: {
+		errors?: number;
+		warnings?: number;
+	};
 }
 
 const OUTPUT_SCHEMA = {
@@ -55,32 +103,9 @@ const OUTPUT_SCHEMA = {
 };
 
 async function ensureCronDirectories(cronDir: string): Promise<void> {
-	await mkdir(getCronJobsDir(cronDir), { recursive: true });
+	await mkdir(join(cronDir, "jobs"), { recursive: true });
 	await mkdir(join(cronDir, "capabilities"), { recursive: true });
 	await mkdir(join(cronDir, "output"), { recursive: true });
-}
-
-async function listFiles(root: string): Promise<string[]> {
-	const files: string[] = [];
-	async function walk(dir: string): Promise<void> {
-		let entries;
-		try {
-			entries = await readdir(dir, { withFileTypes: true });
-		} catch {
-			return;
-		}
-		for (const entry of entries) {
-			if (entry.name === "output") continue;
-			const path = join(dir, entry.name);
-			if (entry.isDirectory()) {
-				await walk(path);
-			} else if (entry.isFile()) {
-				files.push(relative(root, path));
-			}
-		}
-	}
-	await walk(root);
-	return files.sort();
 }
 
 function isInside(parent: string, candidate: string): boolean {
@@ -119,13 +144,20 @@ function extractChangedFiles(cronDir: string, items: ThreadItem[]): {
 	return { files: Array.from(files).sort(), diagnostics };
 }
 
-async function buildPrompt(cronDir: string, request: string): Promise<string> {
-	const [jobs, capabilities, files] = await Promise.all([
-		scanCronJobs(cronDir),
-		scanCapabilities(cronDir),
-		listFiles(cronDir),
-	]);
+function readCronRegistryContext(): CronRegistryContext {
+	const sqlite = getSqlite();
+	const jobs = sqlite
+		.prepare("SELECT name, description, cronExpression FROM cron_jobs ORDER BY name")
+		.all() as CronRegistryJob[];
+	const capabilities = sqlite
+		.prepare(
+			"SELECT slug, name, description, inputSchemaJson, outputSchemaJson FROM cron_capabilities ORDER BY slug",
+		)
+		.all() as CronRegistryCapability[];
+	return { jobs, capabilities };
+}
 
+function buildPrompt(context: CronRegistryContext, request: string): string {
 	return [
 		"You are generating Mini-Claw cron artifacts.",
 		"",
@@ -140,21 +172,19 @@ async function buildPrompt(cronDir: string, request: string): Promise<string> {
 		"- Use ESM .mjs files.",
 		"- Use #cron/capabilities/... imports when a job uses a capability.",
 		"- A .cron file contains only the cron expression.",
+		"- Every job .mjs file must include a top-level static comment: // description: <human-readable purpose>.",
 		"- Job names must use letters, numbers, dashes, or underscores.",
 		"- Output is log-only by default; do not send Telegram messages.",
 		"",
 		"Existing jobs:",
-		jobs.jobs.length
-			? jobs.jobs.map((job) => `- ${job.name}: ${job.cron}`).join("\n")
+		context.jobs.length
+			? context.jobs.map((job) => `- ${job.name}: ${job.description} (${job.cronExpression})`).join("\n")
 			: "- none",
 		"",
 		"Existing capabilities:",
-		capabilities.capabilities.length
-			? capabilities.capabilities.map((capability) => `- ${capability.name}: ${capability.description}`).join("\n")
+		context.capabilities.length
+			? context.capabilities.map((capability) => `- ${capability.slug} (${capability.name}): ${capability.description}`).join("\n")
 			: "- none",
-		"",
-		"Existing cron files:",
-		files.length ? files.map((file) => `- ${file}`).join("\n") : "- none",
 		"",
 		"User request:",
 		request,
@@ -179,14 +209,70 @@ function parseStructuredResponse(response: string): { summary?: string; files?: 
 	}
 }
 
+async function runCronValidator(input: { appRoot: string; cronDir: string }): Promise<ValidatorProcessResult> {
+	const validatorPath = join(input.appRoot, "cron", "validator.mjs");
+	const args = [validatorPath, "--cron-dir", input.cronDir, "--json", "--write-db"];
+	try {
+		const result = await execFileAsync(process.execPath, args, {
+			cwd: input.appRoot,
+			encoding: "utf-8",
+			maxBuffer: 1024 * 1024 * 10,
+		});
+		return {
+			exitCode: 0,
+			stdout: result.stdout,
+			stderr: result.stderr,
+		};
+	} catch (error) {
+		const failed = error as Error & {
+			code?: number;
+			stdout?: string;
+			stderr?: string;
+		};
+		return {
+			exitCode: typeof failed.code === "number" ? failed.code : 1,
+			stdout: failed.stdout ?? "",
+			stderr: failed.stderr ?? failed.message,
+		};
+	}
+}
+
+function parseValidatorOutput(result: ValidatorProcessResult): {
+	diagnostics: ValidationDiagnostic[];
+	ok: boolean;
+} {
+	const diagnostics: ValidationDiagnostic[] = [];
+	let parsed: ValidatorJson | undefined;
+	try {
+		parsed = JSON.parse(result.stdout) as ValidatorJson;
+	} catch {
+		const detail = result.stderr.trim() || result.stdout.trim() || `Validator exited with code ${result.exitCode}.`;
+		diagnostics.push({
+			level: "error",
+			message: `Cron validator did not return JSON: ${detail}`,
+		});
+		return { diagnostics, ok: false };
+	}
+
+	diagnostics.push(...(parsed.errors ?? []));
+	diagnostics.push(...(parsed.warnings ?? []));
+	const hasErrors =
+		result.exitCode !== 0 ||
+		parsed.ok === false ||
+		(parsed.counts?.errors ?? 0) > 0 ||
+		diagnostics.some((diagnostic) => diagnostic.level === "error");
+	return { diagnostics, ok: !hasErrors };
+}
+
 export async function generateCronArtifacts(
 	input: GenerateCronArtifactsInput,
 	options: GenerateCronArtifactsOptions = {},
 ): Promise<GenerateCronArtifactsResult> {
 	const cronDir = resolve(input.cronDir);
+	const appRoot = resolve(input.appRoot);
 	await ensureCronDirectories(cronDir);
-	const beforeFiles = new Set(await listFiles(cronDir));
-	const prompt = await buildPrompt(cronDir, input.request);
+	const context = (options.readCronContext ?? readCronRegistryContext)();
+	const prompt = buildPrompt(context, input.request);
 	const codex = options.codex ?? new Codex();
 	const thread = codex.startThread({
 		workingDirectory: cronDir,
@@ -197,34 +283,27 @@ export async function generateCronArtifacts(
 	});
 
 	const turn = await thread.run(prompt, { outputSchema: OUTPUT_SCHEMA });
-	const afterFiles = await listFiles(cronDir);
 	const changed = extractChangedFiles(cronDir, turn.items);
 	const response = parseStructuredResponse(turn.finalResponse);
 	const generatedFiles = new Set<string>([
 		...changed.files,
 		...(response.files ?? []).map((file) => normalizeGeneratedPath(cronDir, file)).filter((file): file is string => !!file),
-		...afterFiles.filter((file) => !beforeFiles.has(file)),
 	]);
 
-	const [jobs, capabilities] = await Promise.all([
-		scanCronJobs(cronDir),
-		scanCapabilities(cronDir),
-	]);
-
-	const diagnostics = [
-		...changed.diagnostics,
-		...jobs.diagnostics,
-		...capabilities.diagnostics,
-	];
+	const validator = options.runValidator ?? runCronValidator;
+	const validatorResult = await validator({ appRoot, cronDir });
+	const validatorParsed = parseValidatorOutput(validatorResult);
+	const diagnostics = [...changed.diagnostics, ...validatorParsed.diagnostics];
 	const files = Array.from(generatedFiles).sort();
 	let pm2Restart: Pm2RestartResult | undefined;
 	const shouldRestart = input.restartCron !== false &&
 		files.length > 0 &&
+		validatorParsed.ok &&
 		!diagnostics.some((diagnostic) => diagnostic.level === "error");
 
 	if (shouldRestart) {
 		const restart = options.restartCronProcess ?? ((appRoot: string) => restartCronPm2({ appRoot }));
-		pm2Restart = await restart(resolve(input.appRoot));
+		pm2Restart = await restart(appRoot);
 		if (!pm2Restart.ok) {
 			diagnostics.push({
 				level: "warn",
@@ -242,28 +321,18 @@ export async function generateCronArtifacts(
 	};
 }
 
-export async function describeCronDir(cronDir: string): Promise<string> {
-	const resolvedCronDir = resolve(cronDir);
-	const files = await listFiles(resolvedCronDir);
-	if (files.length === 0) return "No cron artifacts exist yet.";
-	const lines: string[] = [];
-	for (const file of files) {
-		const fullPath = join(resolvedCronDir, file);
-		const stats = await stat(fullPath);
-		lines.push(`${file} (${stats.size} bytes)`);
+export function describeCronRegistry(context = readCronRegistryContext()): string {
+	if (context.jobs.length === 0 && context.capabilities.length === 0) {
+		return "No cron artifacts are registered yet.";
 	}
+	const lines = [
+		...context.jobs.map((job) => `job ${job.name}: ${job.description} (${job.cronExpression})`),
+		...context.capabilities.map((capability) => `capability ${capability.slug}: ${capability.description}`),
+	];
 	return lines.join("\n");
 }
 
 export function formatGeneratedFiles(files: string[]): string {
 	if (files.length === 0) return "No file changes were reported.";
 	return files.map((file) => `- ${join("cron", file)}`).join("\n");
-}
-
-export function inferCronRootFromScheduler(schedulerPath: string): string {
-	return dirname(resolve(schedulerPath));
-}
-
-export function cronArtifactName(path: string): string {
-	return basename(path);
 }

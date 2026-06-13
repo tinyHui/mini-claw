@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startCronScheduler } from "../dist/cron/scheduler-runtime.js";
-import { initializeLogger, logger } from "../dist/logger.js";
+import { initializeLogger, logger } from "./logger.mjs";
+import { startCronScheduler } from "./scheduler-runtime.mjs";
 
 const schedulerDir = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(schedulerDir, "..");

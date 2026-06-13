@@ -37,10 +37,16 @@ Job names must be a single safe path component using letters, numbers, dashes, o
 ## Job Files
 
 Each job needs a `.mjs` file and a sibling `.cron` file with the same base name.
+Each job `.mjs` file must include a static top-level description comment so Mini-Claw can index it without executing job code:
+
+```js
+// description: Fetches and logs a daily Hacker News digest.
+```
 
 Example `cron/jobs/hackernews_digest.mjs`:
 
 ```js
+// description: Fetches and logs a daily Hacker News digest.
 import { fetchTopStories } from "#cron/capabilities/001-hackernews/index.mjs";
 import { summarizeStories } from "#cron/capabilities/002-llm-summary/index.mjs";
 
@@ -113,7 +119,6 @@ export async function fetchTopStories({ limit }) {
 
 ## Constraints
 
-- Do not add Telegram `/cron` commands.
 - Do not edit files outside `cron/jobs` or `cron/capabilities` for cron generation.
 - Do not duplicate capability logic when an existing capability can be reused.
 - Keep jobs small; put reusable or external-service logic in capabilities.

@@ -40,7 +40,7 @@ miniclaw.db-wal
 cron/**/*.yaml
 cron/**/*.cron
 cron/**/*.mjs
-!cron/scheduler.mjs
+!cron/*.mjs
 
 # reference project
 hermes-agent/
