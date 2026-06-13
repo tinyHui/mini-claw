@@ -7,7 +7,7 @@ Lightweight Telegram bot for persistent AI conversations using Pi coding agent.
 - **Simple**: Minimal dependencies, single-purpose
 - **Persistent**: Long-running conversations with session management
 - **Subscription-friendly**: Use Claude Pro/Max or ChatGPT Plus via OAuth (no API costs)
-- **Platform-agnostic core**: The database layer, repositories, and AI processor must not reference any specific messaging platform (Telegram, Discord, etc.). Use generic terms like `sessionId`, `platformMsgId`, and `channelId` instead of platform-specific names. Only the adapter layer (e.g. `agent/channels/telegram.ts`) is allowed to contain platform-specific code.
+- **Telegram-only**: One Telegram bot serves one authorized Telegram user. `TELEGRAM_USER_ID` is required and all other users are rejected.
 
 ## Tech Stack
 
@@ -19,53 +19,46 @@ Lightweight Telegram bot for persistent AI conversations using Pi coding agent.
 ## Architecture
 
 ```
-┌──────────────────┐     ┌─────────────────┐     ┌─────────────┐
-│  Messaging       │────►│  Channel        │────►│  Pi Agent   │
-│  Platform        │◄────│  (onMessage cb) │◄────│  (Runner)   │
-│  (Telegram, …)   │     └────────┬────────┘     └─────────────┘
-└──────────────────┘              │
-                                  ▼
-                           SQLite (miniclaw.db)
-                           ├── sessions
-                           └── messages
+┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
+│  Telegram   │────►│  Mini-Claw      │────►│  Pi Agent   │
+│  User       │◄────│  Telegram Bot   │◄────│  Runner     │
+└─────────────┘     └────────┬────────┘     └─────────────┘
+                             │
+                             ▼
+                      SQLite (miniclaw.db)
+                      ├── sessions
+                      └── messages
 ```
 
-### Channel Interface (`agent/channels/channel.ts`)
+### Telegram Bot (`agent/channels/telegram.ts`)
 
-All messaging platforms are abstracted behind the `Channel` interface. Only the concrete adapter (e.g. `agent/channels/telegram.ts`) contains platform-specific code.
+The Telegram bot owns inbound message handling, Telegram authorization, command registration, and Telegram delivery behavior.
 
 | Method | Description |
 |---|---|
 | `onMessage(callback)` | Registers the orchestration callback invoked on every user message |
 | `onMessageSent(callback)` | Registers a callback fired after `updateOrSendMessage` completes — use this to sync the DB instead of repeating the same arguments at the call site |
-| `sendAckMessage(sessionId, content)` | Sends an immediate acknowledgement; returns `platformMsgId` or `undefined` if the platform does not support ack messages |
-| `updateOrSendMessage(sessionId, content, platformMsgId?)` | Delivers the final response: edits the ack message in place when `platformMsgId` is provided, otherwise sends a new message. Falls back to a new message if the edit fails. Fires `onMessageSent` once delivered. |
-| `start()` / `stop()` | Channel lifecycle |
+| `sendAckMessage(chatId, sessionId, content)` | Sends an immediate Telegram acknowledgement; returns the Telegram message ID or `undefined` if sending fails |
+| `updateOrSendMessage(chatId, sessionId, content, telegramMessageId?)` | Delivers the final response: edits the ack message in place when possible, otherwise sends a new message. Fires `onMessageSent` once delivered. |
+| `start()` / `stop()` | Bot lifecycle |
 
 ### Callback-Driven Workflow (`agent/index.ts`)
 
 ```
-channel receives message
+Telegram receives an authorized text message
   → ensureSession (create DB session if absent)
   → insertMessage (role='user', status='pending')
   → sendAckMessage
-      → platformMsgId returned  → insertAckMessage (role='assistant', status='ACK')
+      → telegramMessageId returned  → insertAckMessage (role='assistant', status='ACK')
       → undefined returned      → no ack row inserted
   → runPiWithStreaming
-      → progress: updateOrSendMessage(platformMsgId) — edits ack in place (no DB sync)
-  → updateOrSendMessage(finalContent, platformMsgId?)
+      → progress: updateOrSendMessage(telegramMessageId) — edits ack in place (no DB sync)
+  → updateOrSendMessage(finalContent, telegramMessageId?)
       → fires onMessageSent → updateOrInsertAssistantMessage
-          → platformMsgId present → resolveAckMessage (update ack row, status='processed')
-          → platformMsgId absent  → insertMessage (role='assistant', status='processed')
+          → telegramMessageId present → resolveAckMessage (update ack row, status='processed')
+          → telegramMessageId absent  → insertMessage (role='assistant', status='processed')
   → markMessageProcessed (user message)
 ```
-
-### Adding a New Channel
-
-1. Create `agent/channels/<platform>.ts` implementing `Channel`
-2. Instantiate it in `agent/index.ts` and register `onMessage` + `onMessageSent`
-3. `sendAckMessage` may return `undefined` if the platform has no ack concept — the rest of the workflow handles both cases
-4. No changes required to repositories, DB, or Pi runner
 
 ## Directory Structure
 
@@ -79,8 +72,7 @@ mini-claw/
 ├── agent/
 │   ├── index.ts                 # Entry point & workflow orchestration
 │   ├── channels/
-│   │   ├── channel.ts           # Channel interface (platform-agnostic)
-│   │   └── telegram.ts          # Telegram adapter (implements Channel)
+│   │   └── telegram.ts          # Telegram bot adapter
 │   ├── db.ts                    # SQLite init (better-sqlite3)
 │   ├── session-repository.ts    # CRUD for sessions table
 │   ├── message-repository.ts    # CRUD for messages table
@@ -100,9 +92,9 @@ make install
 # 2. Login to AI provider (Claude/ChatGPT)
 make login
 
-# 3. Configure Telegram bot token
+# 3. Configure Telegram bot token and user ID
 cp .env.example .env
-# Edit .env with your TELEGRAM_BOT_TOKEN
+# Edit .env with your TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID
 
 # 4. Start the bot
 make start
@@ -124,6 +116,7 @@ make start
 ```bash
 # Required
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_USER_ID=123456
 
 # Optional
 MINI_CLAW_WORKSPACE=/path/to/workspace  # Default: ~/mini-claw-workspace
@@ -131,7 +124,6 @@ MINI_CLAW_SESSION_DIR=~/.mini-claw/sessions
 MINI_CLAW_APP_ROOT=/path/to/mini-claw    # Default: current process cwd
 MINI_CLAW_CRON_DIR=/path/to/mini-claw/cron
 PI_THINKING_LEVEL=low                   # low | medium | high
-ALLOWED_USERS=123,456                   # Comma-separated user IDs (empty = allow all)
 
 # Rate Limiting & Timeouts (all in milliseconds)
 RATE_LIMIT_COOLDOWN_MS=5000             # Default: 5 seconds between messages
@@ -142,8 +134,8 @@ SESSION_TITLE_TIMEOUT_MS=10000          # Default: 10 seconds
 
 ## Session Management
 
-- Each Telegram chat gets its own Pi session file
-- Session file: `~/.mini-claw/sessions/telegram-<chat_id>.jsonl`
+- Mini-Claw keeps one active DB session at a time
+- Session file: `~/.mini-claw/sessions/<timestamp>_<session_id>.jsonl`
 - Pi handles auto-compaction when context window fills
 - Full history preserved in JSONL, compacted context for AI
 

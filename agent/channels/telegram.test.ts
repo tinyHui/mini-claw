@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../config.js";
-import type { MessageSentCallback } from "./channel.js";
 
 const {
 	mockSendMessage,
@@ -84,7 +83,7 @@ vi.mock("../cron/pm2.js", () => ({
 	restartCronPm2: (...args: unknown[]) => mockRestartCronPm2(...args),
 }));
 
-import { TelegramChannel, toTelegramMarkdown } from "./telegram.js";
+import { TelegramChannel, toTelegramMarkdown, type TelegramMessageSentCallback } from "./telegram.js";
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
 	return {
@@ -95,6 +94,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
 		sessionDir: "/tmp/sessions",
 		logLevel: "debug",
 		thinkingLevel: "low",
+		telegramUserId: 123,
 		rateLimitCooldownMs: 5000,
 		piTimeoutMs: 300000,
 		shellTimeoutMs: 60000,
@@ -117,7 +117,7 @@ function apiError(desc: string) {
 
 describe("TelegramChannel", () => {
 	let channel: TelegramChannel;
-	let sentCallback: ReturnType<typeof vi.fn<MessageSentCallback>>;
+	let sentCallback: ReturnType<typeof vi.fn<TelegramMessageSentCallback>>;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -132,7 +132,7 @@ describe("TelegramChannel", () => {
 			stderr: "",
 		});
 		channel = new TelegramChannel(makeConfig());
-		sentCallback = vi.fn<MessageSentCallback>();
+		sentCallback = vi.fn<TelegramMessageSentCallback>();
 		channel.onMessageSent(sentCallback);
 	});
 
@@ -175,7 +175,7 @@ describe("TelegramChannel", () => {
 			);
 		});
 
-		it("fires callback with the original platformMsgId on successful edit", async () => {
+		it("fires callback with the original Telegram message ID on successful edit", async () => {
 			mockEditMessageText.mockResolvedValue(true);
 
 			await channel.updateOrSendMessage("123", "s1", "Done", "42", "processed");
@@ -218,7 +218,7 @@ describe("TelegramChannel", () => {
 			expect(mockSendMessage).toHaveBeenCalled();
 		});
 
-		it("still fires callback with original platformMsgId when falling back to new message", async () => {
+		it("still fires callback with original Telegram message ID when falling back to new message", async () => {
 			mockEditMessageText
 				.mockRejectedValueOnce(apiError("err1"))
 				.mockRejectedValueOnce(apiError("err2"));
@@ -255,8 +255,8 @@ describe("TelegramChannel", () => {
 		});
 	});
 
-	describe("updateOrSendMessage — no platformMsgId", () => {
-		it("sends a new message when no platformMsgId is provided", async () => {
+	describe("updateOrSendMessage — no Telegram message ID", () => {
+		it("sends a new message when no Telegram message ID is provided", async () => {
 			mockSendMessage.mockResolvedValue({ message_id: 55 });
 
 			await channel.updateOrSendMessage("123", "s1", "Hello", undefined, "processed");
@@ -275,9 +275,9 @@ describe("TelegramChannel", () => {
 	});
 
 	describe("single-user authorization", () => {
-		it("does not register auth middleware when TELEGRAM_USER_ID is unset", () => {
+		it("always registers auth middleware", () => {
 			new TelegramChannel(makeConfig());
-			expect(mockUse).not.toHaveBeenCalled();
+			expect(mockUse).toHaveBeenCalled();
 		});
 
 		it("allows only the configured Telegram user ID", async () => {
@@ -295,6 +295,11 @@ describe("TelegramChannel", () => {
 
 			next.mockClear();
 			await middleware({ from: { id: 456 }, reply }, next);
+			expect(next).not.toHaveBeenCalled();
+			expect(reply).toHaveBeenCalledWith("Sorry, you are not authorized to use this bot.");
+
+			reply.mockClear();
+			await middleware({ reply }, next);
 			expect(next).not.toHaveBeenCalled();
 			expect(reply).toHaveBeenCalledWith("Sorry, you are not authorized to use this bot.");
 		});

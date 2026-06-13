@@ -77,6 +77,7 @@ describe("pi-runner", () => {
 		sessionDir: "/sessions",
 		logLevel: "info",
 		thinkingLevel: "low",
+		telegramUserId: 123,
 		rateLimitCooldownMs: 5000,
 		piTimeoutMs: 300000,
 		shellTimeoutMs: 60000,
@@ -140,7 +141,6 @@ describe("pi-runner", () => {
 
 		const result = await runPiWithStreaming(
 			config,
-			"ch-1",
 			"sess-1",
 			"hi",
 			"/workspace",
@@ -161,8 +161,8 @@ describe("pi-runner", () => {
 		);
 		mockFollowUp.mockResolvedValue(undefined);
 
-		const first = runPiWithStreaming(config, "ch-1", "sess-1", "first", "/workspace", () => {});
-		const second = runPiWithStreaming(config, "ch-1", "sess-1", "second", "/workspace", () => {});
+		const first = runPiWithStreaming(config, "sess-1", "first", "/workspace", () => {});
+		const second = runPiWithStreaming(config, "sess-1", "second", "/workspace", () => {});
 
 		await vi.waitFor(() => {
 			expect(mockFollowUp).toHaveBeenCalledWith("second");
@@ -210,7 +210,6 @@ describe("pi-runner", () => {
 
 		const result = await runPiWithStreaming(
 			config,
-			"ch-1",
 			"sess-1",
 			"list files",
 			"/workspace",
@@ -242,7 +241,6 @@ describe("pi-runner", () => {
 
 		const result = await runPiWithStreaming(
 			config,
-			"ch-1",
 			"sess-1",
 			"list files",
 			"/workspace",
@@ -261,7 +259,6 @@ describe("pi-runner", () => {
 
 		const result = await runPiWithStreaming(
 			config,
-			"ch-1",
 			"sess-1",
 			"hi",
 			"/workspace",

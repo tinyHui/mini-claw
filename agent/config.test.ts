@@ -41,6 +41,7 @@ describe("config", () => {
 
 		it("should trim TELEGRAM_BOT_TOKEN", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "  my-token  ";
+			process.env.TELEGRAM_USER_ID = "123";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
 			expect(config.telegramToken).toBe("my-token");
@@ -48,6 +49,7 @@ describe("config", () => {
 
 		it("should use default workspace when MINI_CLAW_WORKSPACE is not set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			delete process.env.MINI_CLAW_WORKSPACE;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -56,6 +58,7 @@ describe("config", () => {
 
 		it("should use custom workspace when MINI_CLAW_WORKSPACE is set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.MINI_CLAW_WORKSPACE = "/custom/workspace";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -64,6 +67,7 @@ describe("config", () => {
 
 		it("should trim MINI_CLAW_WORKSPACE", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.MINI_CLAW_WORKSPACE = "  /custom/path  ";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -72,6 +76,7 @@ describe("config", () => {
 
 		it("should use default session directory when MINI_CLAW_SESSION_DIR is not set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			delete process.env.MINI_CLAW_SESSION_DIR;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -80,6 +85,7 @@ describe("config", () => {
 
 		it("should use custom session directory when MINI_CLAW_SESSION_DIR is set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.MINI_CLAW_SESSION_DIR = "/custom/sessions";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -88,6 +94,7 @@ describe("config", () => {
 
 		it("should use 'low' thinking level by default", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			delete process.env.PI_THINKING_LEVEL;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -96,6 +103,7 @@ describe("config", () => {
 
 		it("should accept 'medium' thinking level", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.PI_THINKING_LEVEL = "medium";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -104,6 +112,7 @@ describe("config", () => {
 
 		it("should accept 'high' thinking level", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.PI_THINKING_LEVEL = "high";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -112,26 +121,25 @@ describe("config", () => {
 
 		it("should trim PI_THINKING_LEVEL", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.PI_THINKING_LEVEL = "  high  ";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
 			expect(config.thinkingLevel).toBe("high");
 		});
 
-		it("should leave telegramUserId undefined when TELEGRAM_USER_ID is not set", async () => {
+		it("should throw when TELEGRAM_USER_ID is not set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
 			delete process.env.TELEGRAM_USER_ID;
 			const { loadConfig } = await import("./config.js");
-			const config = loadConfig();
-			expect(config.telegramUserId).toBeUndefined();
+			expect(() => loadConfig()).toThrow("TELEGRAM_USER_ID is required");
 		});
 
-		it("should leave telegramUserId undefined when TELEGRAM_USER_ID is empty", async () => {
+		it("should throw when TELEGRAM_USER_ID is empty", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
 			process.env.TELEGRAM_USER_ID = "";
 			const { loadConfig } = await import("./config.js");
-			const config = loadConfig();
-			expect(config.telegramUserId).toBeUndefined();
+			expect(() => loadConfig()).toThrow("TELEGRAM_USER_ID is required");
 		});
 
 		it("should parse TELEGRAM_USER_ID", async () => {
@@ -193,6 +201,7 @@ describe("config", () => {
 
 		it("should default logLevel to 'info' when LOG_LEVEL is not set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			delete process.env.LOG_LEVEL;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -201,6 +210,7 @@ describe("config", () => {
 
 		it("should trim LOG_LEVEL", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.LOG_LEVEL = "  debug  ";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -209,6 +219,7 @@ describe("config", () => {
 
 		it("should use custom app root and cron directory", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.MINI_CLAW_APP_ROOT = "/apps/mini-claw";
 			process.env.MINI_CLAW_CRON_DIR = "/custom/cron";
 			const { loadConfig } = await import("./config.js");
@@ -219,6 +230,7 @@ describe("config", () => {
 
 		it("should default cron directory under app root", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.MINI_CLAW_APP_ROOT = "/apps/mini-claw";
 			delete process.env.MINI_CLAW_CRON_DIR;
 			const { loadConfig } = await import("./config.js");
@@ -228,6 +240,7 @@ describe("config", () => {
 
 		it("should return cached config on subsequent calls", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			const { loadConfig } = await import("./config.js");
 			const first = loadConfig();
 			process.env.TELEGRAM_BOT_TOKEN = "changed-token";
@@ -237,6 +250,7 @@ describe("config", () => {
 
 		it("should return fresh config after resetConfigCache", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			const { loadConfig, resetConfigCache } = await import("./config.js");
 			const first = loadConfig();
 			resetConfigCache();
@@ -248,6 +262,7 @@ describe("config", () => {
 
 		it("should use default rate limit cooldown of 5000ms", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			delete process.env.RATE_LIMIT_COOLDOWN_MS;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -256,6 +271,7 @@ describe("config", () => {
 
 		it("should use custom rate limit cooldown when set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.RATE_LIMIT_COOLDOWN_MS = "10000";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -264,6 +280,7 @@ describe("config", () => {
 
 		it("should use default Pi timeout of 5 minutes", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			delete process.env.PI_TIMEOUT_MS;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -272,6 +289,7 @@ describe("config", () => {
 
 		it("should use custom Pi timeout when set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.PI_TIMEOUT_MS = "600000";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -280,6 +298,7 @@ describe("config", () => {
 
 		it("should use default shell timeout of 60 seconds", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			delete process.env.SHELL_TIMEOUT_MS;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -288,6 +307,7 @@ describe("config", () => {
 
 		it("should use custom shell timeout when set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.SHELL_TIMEOUT_MS = "120000";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -296,6 +316,7 @@ describe("config", () => {
 
 		it("should use default session title timeout of 10 seconds", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			delete process.env.SESSION_TITLE_TIMEOUT_MS;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
@@ -304,6 +325,7 @@ describe("config", () => {
 
 		it("should use custom session title timeout when set", async () => {
 			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
 			process.env.SESSION_TITLE_TIMEOUT_MS = "20000";
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();

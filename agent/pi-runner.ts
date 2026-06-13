@@ -57,7 +57,7 @@ interface PendingRequest {
 	heartbeat: NodeJS.Timeout;
 }
 
-interface ChannelRuntime {
+interface PiRuntime {
 	sessionId?: string;
 	workspace?: string;
 	session?: AgentSession;
@@ -70,7 +70,10 @@ interface ChannelRuntime {
 class PiSdkRunner {
 	private readonly authStorage: AuthStorage;
 	private readonly modelRegistry: ModelRegistry;
-	private readonly runtimes = new Map<string, ChannelRuntime>();
+	private readonly runtime: PiRuntime = {
+		queue: [],
+		running: false,
+	};
 
 	constructor(private readonly config: Config) {
 		this.authStorage = AuthStorage.create();
@@ -87,13 +90,12 @@ class PiSdkRunner {
 	}
 
 	async runWithStreaming(
-		channelId: string,
 		sessionId: string,
 		prompt: string,
 		workspace: string,
 		onActivity: ActivityCallback,
 	): Promise<RunResult> {
-		const runtime = this.getRuntime(channelId);
+		const runtime = this.runtime;
 		const session = await this.getOrCreateSession(runtime, sessionId, workspace);
 		const resultPromise = new Promise<RunResult>((resolve, reject) => {
 			const request: PendingRequest = {
@@ -149,20 +151,8 @@ class PiSdkRunner {
 		}
 	}
 
-	private getRuntime(channelId: string): ChannelRuntime {
-		let runtime = this.runtimes.get(channelId);
-		if (!runtime) {
-			runtime = {
-				queue: [],
-				running: false,
-			};
-			this.runtimes.set(channelId, runtime);
-		}
-		return runtime;
-	}
-
 	private async getOrCreateSession(
-		runtime: ChannelRuntime,
+		runtime: PiRuntime,
 		sessionId: string,
 		workspace: string,
 	): Promise<AgentSession> {
@@ -257,7 +247,7 @@ class PiSdkRunner {
 		return sessionManager;
 	}
 
-	private handleSessionEvent(runtime: ChannelRuntime, event: AgentSessionEvent): void {
+	private handleSessionEvent(runtime: PiRuntime, event: AgentSessionEvent): void {
 		const request = runtime.queue[0];
 		if (!request) {
 			if (event.type === "agent_end") {
@@ -281,7 +271,7 @@ class PiSdkRunner {
 		}
 	}
 
-	private resolveHead(runtime: ChannelRuntime): void {
+	private resolveHead(runtime: PiRuntime): void {
 		const request = runtime.queue.shift();
 		if (!request) return;
 		clearTimeout(request.timeout);
@@ -295,7 +285,7 @@ class PiSdkRunner {
 		});
 	}
 
-	private failAll(runtime: ChannelRuntime, error: unknown): void {
+	private failAll(runtime: PiRuntime, error: unknown): void {
 		const message = this.errorMessage(error);
 		while (runtime.queue.length > 0) {
 			const request = runtime.queue.shift();
@@ -311,7 +301,7 @@ class PiSdkRunner {
 		runtime.running = false;
 	}
 
-	private removeRequest(runtime: ChannelRuntime, target: PendingRequest): void {
+	private removeRequest(runtime: PiRuntime, target: PendingRequest): void {
 		const index = runtime.queue.indexOf(target);
 		if (index >= 0) {
 			runtime.queue.splice(index, 1);
@@ -376,14 +366,12 @@ function getRunner(config: Config): PiSdkRunner {
 
 export async function runPi(
 	config: Config,
-	channelId: string,
 	sessionId: string,
 	prompt: string,
 	workspace: string,
 	_files?: string[],
 ): Promise<RunResult> {
 	return getRunner(config).runWithStreaming(
-		channelId,
 		sessionId,
 		prompt,
 		workspace,
@@ -393,7 +381,6 @@ export async function runPi(
 
 export async function runPiWithStreaming(
 	config: Config,
-	channelId: string,
 	sessionId: string,
 	prompt: string,
 	workspace: string,
@@ -401,7 +388,6 @@ export async function runPiWithStreaming(
 	_files?: string[],
 ): Promise<RunResult> {
 	return getRunner(config).runWithStreaming(
-		channelId,
 		sessionId,
 		prompt,
 		workspace,

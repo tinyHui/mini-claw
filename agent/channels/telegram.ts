@@ -1,6 +1,5 @@
 import { Bot, Context, GrammyError } from "grammy";
 import telegramifyMarkdown from "telegramify-markdown";
-import type { Channel, DeliveryStatus, MessageCallback, MessageSentCallback } from "./channel.js";
 import type { Config } from "../config.js";
 import { restartCronPm2 } from "../cron/pm2.js";
 import { logger, withLogContext } from "../logger.js";
@@ -11,6 +10,21 @@ import { formatPath, getWorkspace } from "../workspace.js";
 export function toTelegramMarkdown(text: string): string {
 	return telegramifyMarkdown(text, "escape");
 }
+
+export type DeliveryStatus = "ACK" | "processed";
+
+export type TelegramMessageCallback = (
+	chatId: string,
+	telegramMessageId: string,
+	content: string,
+) => Promise<void>;
+
+export type TelegramMessageSentCallback = (
+	sessionId: string,
+	telegramMessageId: string,
+	content: string,
+	status: DeliveryStatus,
+) => Promise<void>;
 
 const MAX_MESSAGE_LENGTH = 4096;
 
@@ -43,11 +57,11 @@ function isCommandText(text: string, command: string): boolean {
 	return text === `/${command}` || text.startsWith(`/${command}@`);
 }
 
-export class TelegramChannel implements Channel {
+export class TelegramChannel {
 	private bot: Bot<Context>;
 	private config: Config;
-	private messageCallback: MessageCallback | null = null;
-	private messageSentCallback: MessageSentCallback | null = null;
+	private messageCallback: TelegramMessageCallback | null = null;
+	private messageSentCallback: TelegramMessageSentCallback | null = null;
 
 	constructor(config: Config) {
 		this.config = config;
@@ -55,22 +69,22 @@ export class TelegramChannel implements Channel {
 		this.setupHandlers();
 	}
 
-	onMessage(callback: MessageCallback): void {
+	onMessage(callback: TelegramMessageCallback): void {
 		this.messageCallback = callback;
 	}
 
-	onMessageSent(callback: MessageSentCallback): void {
+	onMessageSent(callback: TelegramMessageSentCallback): void {
 		this.messageSentCallback = callback;
 	}
 
 	async sendAckMessage(
-		channelId: string,
+		chatId: string,
 		sessionId: string,
 		content: string,
 	): Promise<string | undefined> {
-		const chatId = parseInt(channelId, 10);
+		const telegramChatId = parseInt(chatId, 10);
 		try {
-			const msg = await this.bot.api.sendMessage(chatId, content);
+			const msg = await this.bot.api.sendMessage(telegramChatId, content);
 			const ackMsgId = String(msg.message_id);
 			if (this.messageSentCallback) {
 				await this.messageSentCallback(sessionId, ackMsgId, content, "ACK");
@@ -82,22 +96,22 @@ export class TelegramChannel implements Channel {
 	}
 
 	async updateOrSendMessage(
-		channelId: string,
+		chatId: string,
 		sessionId: string,
 		content: string,
-		platformMsgId?: string,
+		telegramMessageId?: string,
 		status: DeliveryStatus = "processed",
 	): Promise<void> {
-		const chatId = parseInt(channelId, 10);
+		const telegramChatId = parseInt(chatId, 10);
 
-		if (platformMsgId !== undefined) {
-			await this.editOrReplaceMessage(chatId, parseInt(platformMsgId, 10), content);
+		if (telegramMessageId !== undefined) {
+			await this.editOrReplaceMessage(telegramChatId, parseInt(telegramMessageId, 10), content);
 		} else {
-			await this.sendNewMessage(chatId, content);
+			await this.sendNewMessage(telegramChatId, content);
 		}
 
 		if (status === "processed" && this.messageSentCallback) {
-			await this.messageSentCallback(sessionId, platformMsgId ?? "unknown", content, "processed");
+			await this.messageSentCallback(sessionId, telegramMessageId ?? "unknown", content, "processed");
 		}
 	}
 
@@ -175,7 +189,7 @@ export class TelegramChannel implements Channel {
 				void withLogContext(
 					{
 						operation: "channel_start",
-						channelId: "telegram",
+						chatId: "telegram",
 					},
 					() => logger.info(`Bot @${botInfo.username} is running!`),
 				);
@@ -188,16 +202,14 @@ export class TelegramChannel implements Channel {
 	}
 
 	private setupHandlers(): void {
-		if (this.config.telegramUserId !== undefined) {
-			this.bot.use(async (ctx, next) => {
-				const uid = ctx.from?.id;
-				if (uid === this.config.telegramUserId) {
-					await next();
-				} else {
-					await ctx.reply("Sorry, you are not authorized to use this bot.");
-				}
-			});
-		}
+		this.bot.use(async (ctx, next) => {
+			const uid = ctx.from?.id;
+			if (uid === this.config.telegramUserId) {
+				await next();
+			} else {
+				await ctx.reply("Sorry, you are not authorized to use this bot.");
+			}
+		});
 
 		const commands = [
 			{ command: "new", description: "Start a new session" },
@@ -211,7 +223,7 @@ export class TelegramChannel implements Channel {
 			await withLogContext(
 				{
 					operation: "session_reset",
-					channelId: String(ctx.chat.id),
+					chatId: String(ctx.chat.id),
 					sessionId: session.id,
 				},
 				() => {
@@ -279,13 +291,13 @@ export class TelegramChannel implements Channel {
 	}
 
 	private async restartCronFromCommand(
-		channelId: string,
+		chatId: string,
 		reply: (text: string) => Promise<unknown>,
 	): Promise<void> {
 		await withLogContext(
 			{
 				operation: "cron_restart",
-				channelId,
+				chatId,
 			},
 			async () => {
 				const result = await restartCronPm2({ appRoot: this.config.appRoot });

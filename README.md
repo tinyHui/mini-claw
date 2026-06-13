@@ -11,7 +11,7 @@ A minimalist alternative to OpenClaw - use your Claude Pro/Max or ChatGPT Plus s
 - **Session Management** - Archive, switch, and clean up old sessions
 - **File Attachments** - Automatically sends files created by Pi (PDF, images, documents)
 - **Rate Limiting** - Prevents message spam (configurable cooldown)
-- **Access Control** - Optional allowlist for authorized users
+- **Access Control** - Required single-user Telegram authorization
 - **Typing Indicators** - Shows activity while AI is processing
 
 ## Architecture
@@ -25,7 +25,7 @@ A minimalist alternative to OpenClaw - use your Claude Pro/Max or ChatGPT Plus s
                            ▼
                     ~/.mini-claw/
                     └── sessions/
-                        └── telegram-<chat_id>.jsonl
+                        └── <timestamp>_<session_id>.jsonl
 ```
 
 ## Quick Start
@@ -50,7 +50,7 @@ pi /login
 
 # Configure bot token
 cp .env.example .env
-# Edit .env with your TELEGRAM_BOT_TOKEN
+# Edit .env with your TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID
 
 # Prepare workspace prompt and database
 $EDITOR ~/mini-claw-workspace/SOUL.md
@@ -89,6 +89,7 @@ make test       # Run tests
 ```bash
 # Required
 TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_USER_ID=123456                    # Single authorized Telegram user ID
 
 # Optional
 MINI_CLAW_WORKSPACE=/path/to/workspace    # Default: ~/mini-claw-workspace
@@ -96,7 +97,6 @@ MINI_CLAW_SESSION_DIR=~/.mini-claw/sessions
 MINI_CLAW_APP_ROOT=/path/to/mini-claw      # Default: current process cwd
 MINI_CLAW_CRON_DIR=/path/to/mini-claw/cron # Default: $MINI_CLAW_APP_ROOT/cron
 PI_THINKING_LEVEL=low                      # low | medium | high
-TELEGRAM_USER_ID=123456                    # Single authorized Telegram user ID
 
 # Rate limiting & timeouts (milliseconds)
 RATE_LIMIT_COOLDOWN_MS=5000                # Default: 5 seconds
