@@ -7,7 +7,7 @@ export function getDefaultDatabasePath() {
 }
 
 export function publishCronOutput(
-	{ jobName, content, status = "pending", error = null },
+	{ jobName, content, channel = "telegram" },
 	dbPath = getDefaultDatabasePath(),
 ) {
 	const sqlite = new Database(dbPath, { fileMustExist: true });
@@ -15,16 +15,17 @@ export function publishCronOutput(
 		const row = {
 			id: randomUUID(),
 			jobName,
+			channel,
 			content,
-			status,
-			createdAt: new Date().toISOString(),
-			error,
+			created_at: new Date().toISOString(),
+			send_at: null,
+			fail_reason: null,
 		};
 		sqlite.prepare(`
-			INSERT INTO cron_outputs (
-				id, jobName, content, status, createdAt, error
+			INSERT INTO mailbox (
+				id, jobName, channel, content, created_at, send_at, fail_reason
 			) VALUES (
-				@id, @jobName, @content, @status, @createdAt, @error
+				@id, @jobName, @channel, @content, @created_at, @send_at, @fail_reason
 			)
 		`).run(row);
 		return row;

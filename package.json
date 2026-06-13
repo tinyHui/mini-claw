@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Lightweight Telegram bot for persistent AI conversations using Pi",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/agent/index.js",
   "imports": {
     "#cron/*": "./cron/*"
   },
@@ -11,16 +11,16 @@
     "pi": "pi",
     "dev": "tsx watch agent/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/agent/index.js",
     "cron": "node cron/scheduler.mjs",
     "pm2:start": "pnpm build && pm2 start ecosystem.config.cjs",
     "pm2:restart": "pnpm build && pm2 restart ecosystem.config.cjs",
     "pm2:stop": "pm2 stop ecosystem.config.cjs",
-    "pm2:logs": "pm2 logs mini-claw mini-claw-cron",
+    "pm2:logs": "pm2 logs mini-claw mini-claw-cron mini-claw-mailman",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint agent/ cron/*.mjs",
+    "lint": "eslint agent/ cron/*.mjs mailman/",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

@@ -193,9 +193,10 @@ pnpm pm2:start
 pm2 save
 ```
 
-This starts both the Telegram agent (`mini-claw`) and Bree scheduler
-(`mini-claw-cron`). Cron jobs are authored through normal agent requests and
-the `cron-job-authoring` skill, not Telegram `/cron` commands.
+This starts the Telegram agent (`mini-claw`), Bree scheduler
+(`mini-claw-cron`), and cron output dispatcher (`mini-claw-mailman`). Cron jobs
+are authored through normal agent requests and the `cron-job-authoring` skill,
+not Telegram `/cron` commands.
 
 ### Option 3: tmux (manual)
 

@@ -17,7 +17,7 @@ module.exports = {
 	apps: [
 		{
 			name: "mini-claw",
-			script: "dist/index.js",
+			script: "dist/agent/index.js",
 			cwd: appRoot,
 			interpreter: "node",
 			time: true,
@@ -26,6 +26,14 @@ module.exports = {
 		{
 			name: "mini-claw-cron",
 			script: "cron/scheduler.mjs",
+			cwd: appRoot,
+			interpreter: "node",
+			time: true,
+			env: sharedEnv,
+		},
+		{
+			name: "mini-claw-mailman",
+			script: "dist/mailman/telegram-cron-output.js",
 			cwd: appRoot,
 			interpreter: "node",
 			time: true,

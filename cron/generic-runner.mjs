@@ -63,9 +63,7 @@ export async function runGenericCronWorker(data = workerData) {
 		});
 		publishCronOutput({
 			jobName: task,
-			content: "",
-			status: "failed",
-			error: message,
+			content: `Cron task "${task}" failed:\n${message}`,
 		}, data?.dbPath);
 		throw error;
 	}

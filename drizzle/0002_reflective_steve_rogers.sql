@@ -1,8 +1,9 @@
-CREATE TABLE `cron_outputs` (
+CREATE TABLE `mailbox` (
 	`id` text PRIMARY KEY NOT NULL,
 	`jobName` text NOT NULL,
+	`channel` text DEFAULT 'telegram' NOT NULL,
 	`content` text NOT NULL,
-	`status` text DEFAULT 'pending' NOT NULL,
-	`createdAt` text NOT NULL,
-	`error` text
+	`created_at` text NOT NULL,
+	`send_at` text,
+	`fail_reason` text
 );

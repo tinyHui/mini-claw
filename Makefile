@@ -16,7 +16,7 @@ help:
 	@echo "  make start      Start bot in production mode"
 	@echo "  make build      Compile TypeScript"
 	@echo "  make status     Check Pi auth status"
-	@echo "  make pm2-start  Start Mini-Claw and cron under pm2"
+	@echo "  make pm2-start  Start Mini-Claw, cron, and mailman under pm2"
 	@echo "  make clean      Remove build artifacts"
 	@echo "  make release-package  Build local release tarball"
 	@echo ""

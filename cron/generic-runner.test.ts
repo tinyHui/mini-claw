@@ -32,12 +32,24 @@ async function writeJob(root: string, name: string, body: string): Promise<void>
 	await writeFile(join(root, "cron", "jobs", `${name}.mjs`), body);
 }
 
-function readCronOutputs(root: string): Array<{ jobName: string; content: string; status: string; error: string | null }> {
+function readMailbox(root: string): Array<{
+	jobName: string;
+	channel: string;
+	content: string;
+	send_at: string | null;
+	fail_reason: string | null;
+}> {
 	const sqlite = new Database(join(root, "miniclaw.db"));
 	try {
 		return sqlite
-			.prepare("SELECT jobName, content, status, error FROM cron_outputs ORDER BY createdAt")
-			.all() as Array<{ jobName: string; content: string; status: string; error: string | null }>;
+			.prepare("SELECT jobName, channel, content, send_at, fail_reason FROM mailbox ORDER BY created_at")
+			.all() as Array<{
+				jobName: string;
+				channel: string;
+				content: string;
+				send_at: string | null;
+				fail_reason: string | null;
+			}>;
 	} finally {
 		sqlite.close();
 	}
@@ -61,12 +73,13 @@ describe("generic cron runner", () => {
 		const result = await runGenericRunner(root, "digest");
 
 		expect(result.exitCode).toBe(0);
-		expect(readCronOutputs(root)).toEqual([
+		expect(readMailbox(root)).toEqual([
 			{
 				jobName: "digest",
+				channel: "telegram",
 				content: "daily digest",
-				status: "pending",
-				error: null,
+				send_at: null,
+				fail_reason: null,
 			},
 		]);
 	});
@@ -77,12 +90,13 @@ describe("generic cron runner", () => {
 		const result = await runGenericRunner(root, "missing_run");
 
 		expect(result.exitCode).toBe(1);
-		expect(readCronOutputs(root)).toEqual([
+		expect(readMailbox(root)).toEqual([
 			{
 				jobName: "missing_run",
-				content: "",
-				status: "failed",
-				error: expect.stringContaining("must export async function run()"),
+				channel: "telegram",
+				content: expect.stringContaining("must export async function run()"),
+				send_at: null,
+				fail_reason: null,
 			},
 		]);
 	});
@@ -93,12 +107,13 @@ describe("generic cron runner", () => {
 		const result = await runGenericRunner(root, "bad_return");
 
 		expect(result.exitCode).toBe(1);
-		expect(readCronOutputs(root)).toEqual([
+		expect(readMailbox(root)).toEqual([
 			{
 				jobName: "bad_return",
-				content: "",
-				status: "failed",
-				error: expect.stringContaining("must return a string"),
+				channel: "telegram",
+				content: expect.stringContaining("must return a string"),
+				send_at: null,
+				fail_reason: null,
 			},
 		]);
 	});

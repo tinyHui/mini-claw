@@ -35,7 +35,7 @@ describe("db", () => {
 				"messages",
 				"cron_jobs",
 				"cron_capabilities",
-				"cron_outputs",
+				"mailbox",
 			]),
 		);
 	});

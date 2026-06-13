@@ -159,7 +159,7 @@ The deploy script:
 - updates `~/mini-claw/current`
 - installs dependencies and runs `pnpm db:migrate`
 - creates or refreshes the generated `pm2-$USER` systemd service
-- starts or reloads `mini-claw` and `mini-claw-cron` through pm2
+- starts or reloads `mini-claw`, `mini-claw-cron`, and `mini-claw-mailman` through pm2
 
 These parts stay manual:
 
@@ -191,13 +191,13 @@ is preserved, and the service is updated to point at the new release.
 
 ### Service Management
 
-systemd starts pm2 on boot, and pm2 manages both Node processes:
+systemd starts pm2 on boot, and pm2 manages the Node processes:
 
 ```bash
 systemctl status pm2-$USER
 pm2 status
-pm2 restart mini-claw mini-claw-cron
-pm2 logs mini-claw mini-claw-cron
+pm2 restart mini-claw mini-claw-cron mini-claw-mailman
+pm2 logs mini-claw mini-claw-cron mini-claw-mailman
 ```
 
 If pm2 loses its process list after manual changes, save it again:
@@ -223,9 +223,10 @@ pm2 save
 sudo systemctl enable --now pm2-$USER
 ```
 
-This starts both `mini-claw` and `mini-claw-cron` from `ecosystem.config.cjs`.
+This starts `mini-claw`, `mini-claw-cron`, and `mini-claw-mailman` from `ecosystem.config.cjs`.
 Cron jobs are created by normal Telegram requests that the agent handles with
-the `cron-job-authoring` skill; there are no `/cron` Telegram commands.
+the `cron-job-authoring` skill; there are no `/cron` Telegram commands. Cron
+job output is written to the `mailbox` table and delivered by mailman.
 
 ### tmux
 

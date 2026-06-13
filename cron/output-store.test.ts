@@ -29,16 +29,17 @@ describe("cron output store", () => {
 		const sqlite = new Database(join(root, "miniclaw.db"));
 		try {
 			const outputs = sqlite
-				.prepare("SELECT id, jobName, content, status, createdAt, error FROM cron_outputs")
+				.prepare("SELECT id, jobName, channel, content, created_at, send_at, fail_reason FROM mailbox")
 				.all();
 			expect(outputs).toEqual([
 				{
 					id: row.id,
 					jobName: "digest",
+					channel: "telegram",
 					content: "hello from cron",
-					status: "pending",
-					createdAt: row.createdAt,
-					error: null,
+					created_at: row.created_at,
+					send_at: null,
+					fail_reason: null,
 				},
 			]);
 		} finally {

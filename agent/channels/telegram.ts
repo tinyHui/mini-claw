@@ -1,15 +1,13 @@
 import { Bot, Context, GrammyError } from "grammy";
-import telegramifyMarkdown from "telegramify-markdown";
 import type { Config } from "../config.js";
 import { restartCronPm2 } from "../cron/pm2.js";
 import { logger, withLogContext } from "../logger.js";
 import { checkRateLimit } from "../rate-limiter.js";
 import { ensureSession, resetSession } from "../session-repository.js";
 import { formatPath, getWorkspace } from "../workspace.js";
-
-export function toTelegramMarkdown(text: string): string {
-	return telegramifyMarkdown(text, "escape");
-}
+import { sendTelegramText, TELEGRAM_MAX_MESSAGE_LENGTH } from "./telegram-delivery.js";
+import { toTelegramMarkdown } from "./telegram-format.js";
+export { toTelegramMarkdown } from "./telegram-format.js";
 
 export type DeliveryStatus = "ACK" | "processed";
 
@@ -25,33 +23,6 @@ export type TelegramMessageSentCallback = (
 	content: string,
 	status: DeliveryStatus,
 ) => Promise<void>;
-
-const MAX_MESSAGE_LENGTH = 4096;
-
-function splitMessage(text: string): string[] {
-	if (text.length <= MAX_MESSAGE_LENGTH) return [text];
-
-	const chunks: string[] = [];
-	let remaining = text;
-
-	while (remaining.length > 0) {
-		if (remaining.length <= MAX_MESSAGE_LENGTH) {
-			chunks.push(remaining);
-			break;
-		}
-		let splitIndex = remaining.lastIndexOf("\n", MAX_MESSAGE_LENGTH);
-		if (splitIndex === -1 || splitIndex < MAX_MESSAGE_LENGTH / 2) {
-			splitIndex = remaining.lastIndexOf(" ", MAX_MESSAGE_LENGTH);
-		}
-		if (splitIndex === -1 || splitIndex < MAX_MESSAGE_LENGTH / 2) {
-			splitIndex = MAX_MESSAGE_LENGTH;
-		}
-		chunks.push(remaining.slice(0, splitIndex));
-		remaining = remaining.slice(splitIndex).trimStart();
-	}
-
-	return chunks;
-}
 
 function isCommandText(text: string, command: string): boolean {
 	return text === `/${command}` || text.startsWith(`/${command}@`);
@@ -120,7 +91,7 @@ export class TelegramChannel {
 		messageId: number,
 		content: string,
 	): Promise<void> {
-		if (content.length > MAX_MESSAGE_LENGTH) {
+		if (content.length > TELEGRAM_MAX_MESSAGE_LENGTH) {
 			await this.tryDeleteMessage(chatId, messageId);
 			await this.sendNewMessage(chatId, content);
 			return;
@@ -166,21 +137,7 @@ export class TelegramChannel {
 	}
 
 	private async sendNewMessage(chatId: number, content: string): Promise<string> {
-		const chunks = splitMessage(content);
-		let firstMsgId: string | undefined;
-		for (const chunk of chunks) {
-			try {
-				const mdv2 = toTelegramMarkdown(chunk);
-				const msg = await this.bot.api.sendMessage(chatId, mdv2, {
-					parse_mode: "MarkdownV2",
-				});
-				firstMsgId ??= String(msg.message_id);
-			} catch {
-				const msg = await this.bot.api.sendMessage(chatId, chunk);
-				firstMsgId ??= String(msg.message_id);
-			}
-		}
-		return firstMsgId!;
+		return sendTelegramText(this.bot.api, chatId, content);
 	}
 
 	async start(): Promise<void> {

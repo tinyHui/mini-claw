@@ -4,12 +4,12 @@ export default defineConfig({
 	test: {
 		globals: true,
 		environment: "node",
-		include: ["agent/**/*.test.ts", "cron/*.test.ts"],
+		include: ["agent/**/*.test.ts", "cron/*.test.ts", "mailman/**/*.test.ts"],
 		coverage: {
 			provider: "v8",
 			reporter: ["text", "json", "html"],
-			include: ["agent/**/*.ts"],
-			exclude: ["agent/**/*.test.ts", "agent/index.ts", "agent/bot.ts"],
+			include: ["agent/**/*.ts", "mailman/**/*.ts"],
+			exclude: ["agent/**/*.test.ts", "mailman/**/*.test.ts", "agent/index.ts", "agent/bot.ts"],
 			thresholds: {
 				lines: 80,
 				functions: 80,
