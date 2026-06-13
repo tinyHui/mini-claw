@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createMigratedDatabase } from "../test-database.js";
+import { createMigratedDatabase } from "../agent/test-database.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = process.cwd();
@@ -52,7 +52,7 @@ async function writeValidJob(root: string, name = "digest"): Promise<void> {
 	await mkdir(join(root, "cron", "jobs"), { recursive: true });
 	await writeFile(
 		join(root, "cron", "jobs", `${name}.mjs`),
-		`// description: ${name} job\nconsole.log(${JSON.stringify(name)});\n`,
+		`// description: ${name} job\nexport async function run() { return ${JSON.stringify(name)}; }\n`,
 	);
 	await writeFile(join(root, "cron", "jobs", `${name}.cron`), "0 8 * * *\n");
 }

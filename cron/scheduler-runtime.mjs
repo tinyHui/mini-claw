@@ -1,7 +1,11 @@
 import Bree from "bree";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { scanCapabilities, scanCronJobs } from "./scanner.mjs";
 import { logger } from "./logger.mjs";
+
+const cronRuntimeDir = dirname(fileURLToPath(import.meta.url));
+const genericRunnerPath = resolve(cronRuntimeDir, "generic-runner.mjs");
 
 export async function buildCronScheduler(options) {
 	const [jobResult, capabilityResult] = await Promise.all([
@@ -39,9 +43,15 @@ export async function buildCronScheduler(options) {
 		logger: console,
 		jobs: jobResult.rows.map((job) => ({
 			name: job.name,
-			path: resolve(process.cwd(), job.scriptPath),
+			path: genericRunnerPath,
 			cron: job.cronExpression,
 			hasSeconds: job.hasSeconds === 1,
+			worker: {
+				workerData: {
+					task: job.name,
+					cronDir: options.cronDir,
+				},
+			},
 		})),
 	});
 

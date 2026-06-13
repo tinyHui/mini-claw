@@ -37,7 +37,7 @@ Job names must be a single safe path component using letters, numbers, dashes, o
 ## Job Files
 
 Each job needs a `.mjs` file and a sibling `.cron` file with the same base name.
-Each job `.mjs` file must include a static top-level description comment so Mini-Claw can index it without executing job code:
+Each job `.mjs` file must include a static top-level description comment so Mini-Claw can index it without executing job code, and must export an async `run()` function that returns a string:
 
 ```js
 // description: Fetches and logs a daily Hacker News digest.
@@ -46,18 +46,20 @@ Each job `.mjs` file must include a static top-level description comment so Mini
 Example `cron/jobs/hackernews_digest.mjs`:
 
 ```js
-// description: Fetches and logs a daily Hacker News digest.
+// description: Fetches a daily Hacker News digest.
 import { fetchTopStories } from "#cron/capabilities/001-hackernews/index.mjs";
 import { summarizeStories } from "#cron/capabilities/002-llm-summary/index.mjs";
 
-const stories = await fetchTopStories({ limit: 10 });
-const summary = await summarizeStories({ stories });
+export async function run() {
+  const stories = await fetchTopStories({ limit: 10 });
+  const summary = await summarizeStories({ stories });
 
-console.log(JSON.stringify({
-  job: "hackernews_digest",
-  ran_at: new Date().toISOString(),
-  summary,
-}, null, 2));
+  return JSON.stringify({
+    job: "hackernews_digest",
+    ran_at: new Date().toISOString(),
+    summary,
+  }, null, 2);
+}
 ```
 
 Example `cron/jobs/hackernews_digest.cron`:
@@ -66,7 +68,7 @@ Example `cron/jobs/hackernews_digest.cron`:
 0 8 * * *
 ```
 
-Cron output is log-only by default. Do not send Telegram messages unless a future user request explicitly asks for delivery behavior and a delivery capability exists.
+Cron job `run()` functions must return a string. Mini-Claw's generic cron runner persists that returned string to the cron output outbox. Do not call cron output publishing APIs from generated jobs.
 
 ## Capability Files
 

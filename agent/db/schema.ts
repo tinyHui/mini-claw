@@ -47,6 +47,15 @@ export const cronCapabilities = sqliteTable("cron_capabilities", {
 	validatedAt: text("validatedAt").notNull(),
 });
 
+export const cronOutputs = sqliteTable("cron_outputs", {
+	id: text("id").primaryKey().notNull(),
+	jobName: text("jobName").notNull(),
+	content: text("content").notNull(),
+	status: text("status").notNull().default("pending"),
+	createdAt: text("createdAt").notNull(),
+	error: text("error"),
+});
+
 export type SessionRow = typeof sessions.$inferSelect;
 export type NewSessionRow = typeof sessions.$inferInsert;
 export type MessageRow = typeof messages.$inferSelect;
@@ -55,3 +64,5 @@ export type CronJobRow = typeof cronJobs.$inferSelect;
 export type NewCronJobRow = typeof cronJobs.$inferInsert;
 export type CronCapabilityRow = typeof cronCapabilities.$inferSelect;
 export type NewCronCapabilityRow = typeof cronCapabilities.$inferInsert;
+export type CronOutputRow = typeof cronOutputs.$inferSelect;
+export type NewCronOutputRow = typeof cronOutputs.$inferInsert;
