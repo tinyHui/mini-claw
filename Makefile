@@ -1,4 +1,4 @@
-.PHONY: install login dev start build status clean help test test-watch test-coverage lint typecheck check release-package pi-bootstrap pi-deploy pi-status pm2-start pm2-restart pm2-logs pw-install pw-dev pw-build
+.PHONY: install login dev start build status clean help test test-watch test-coverage lint typecheck check release-package pi-bootstrap pi-deploy pi-status pm2-start pm2-restart pm2-logs install-service pw-install pw-dev pw-build
 
 # Default target
 help:
@@ -10,7 +10,7 @@ help:
 	@echo "  make dev        Start in development mode"
 	@echo ""
 	@echo "Commands:"
-	@echo "  make install    Install pnpm dependencies + pi-coding-agent"
+	@echo "  make install    Install pnpm dependencies + runtime CLIs"
 	@echo "  make login      Run 'pi /login' to authenticate"
 	@echo "  make dev        Start bot with hot reload"
 	@echo "  make start      Start bot in production mode"
@@ -42,7 +42,7 @@ help:
 	@echo "Raspberry Pi Deployment:"
 	@echo "  make pi-bootstrap  Install Pi host prerequisites"
 	@echo "  make pi-deploy     Download latest GitHub release and restart service"
-	@echo "  make pi-status     Show systemd service status"
+	@echo "  make pi-status     Show pm2 and pm2 systemd status"
 
 # Install dependencies
 install:
@@ -51,6 +51,12 @@ install:
 	@echo ""
 	@echo "Checking pi-coding-agent..."
 	@which pi > /dev/null 2>&1 || (echo "Installing pi-coding-agent globally..." && npm install -g @mariozechner/pi-coding-agent)
+	@echo ""
+	@echo "Checking pm2..."
+	@which pm2 > /dev/null 2>&1 || (echo "Installing pm2 globally..." && npm install -g pm2)
+	@echo ""
+	@echo "Checking codex..."
+	@which codex > /dev/null 2>&1 || (echo "Installing codex globally..." && npm install -g @openai/codex)
 	@echo ""
 	@echo "Done! Next steps:"
 	@echo "  1. Run 'make login' to authenticate with Claude/ChatGPT"
@@ -152,36 +158,21 @@ pi-deploy:
 	scripts/pi/deploy.sh
 
 pi-status:
-	systemctl --user status mini-claw
+	pm2 status
+	-systemctl status pm2-$$(whoami)
 
 # Clean build artifacts
 clean:
 	@command -v rip > /dev/null 2>&1 && rip dist node_modules/.cache 2>/dev/null || rm -rf dist node_modules/.cache
 
-# Install systemd service (Linux)
+# Install pm2 systemd service (Linux)
 install-service:
-	@echo "Creating systemd user service..."
-	@mkdir -p ~/.config/systemd/user
-	@echo "[Unit]" > ~/.config/systemd/user/mini-claw.service
-	@echo "Description=Mini-Claw Telegram Bot" >> ~/.config/systemd/user/mini-claw.service
-	@echo "After=network.target" >> ~/.config/systemd/user/mini-claw.service
-	@echo "" >> ~/.config/systemd/user/mini-claw.service
-	@echo "[Service]" >> ~/.config/systemd/user/mini-claw.service
-	@echo "Type=simple" >> ~/.config/systemd/user/mini-claw.service
-	@echo "WorkingDirectory=$$(pwd)" >> ~/.config/systemd/user/mini-claw.service
-	@echo "Environment=HOME=/home/$$(whoami)" >> ~/.config/systemd/user/mini-claw.service
-	@echo "Environment=PATH=/usr/local/bin:/usr/bin:/bin:$$(dirname $$(which node))" >> ~/.config/systemd/user/mini-claw.service
-	@echo "ExecStart=$$(which node) $$(pwd)/dist/index.js" >> ~/.config/systemd/user/mini-claw.service
-	@echo "Restart=on-failure" >> ~/.config/systemd/user/mini-claw.service
-	@echo "RestartSec=5" >> ~/.config/systemd/user/mini-claw.service
-	@echo "" >> ~/.config/systemd/user/mini-claw.service
-	@echo "[Install]" >> ~/.config/systemd/user/mini-claw.service
-	@echo "WantedBy=default.target" >> ~/.config/systemd/user/mini-claw.service
-	@echo ""
-	@echo "Service created. Run:"
-	@echo "  systemctl --user daemon-reload"
-	@echo "  systemctl --user start mini-claw"
-	@echo "  systemctl --user enable mini-claw"
+	@command -v pm2 > /dev/null 2>&1 || (echo "Error: pm2 is not installed. Run 'make install' first." && exit 1)
+	@echo "Configuring systemd to start pm2 on boot..."
+	sudo env PATH="$$PATH" pm2 startup systemd -u "$$(whoami)" --hp "$$HOME"
+	pnpm pm2:start
+	pm2 save
+	sudo systemctl enable --now pm2-$$(whoami)
 
 # Playwright skill targets
 pw-install:

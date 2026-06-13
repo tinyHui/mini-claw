@@ -186,12 +186,12 @@ pnpm lint
 
 ## Deployment
 
-### Option 1: systemd (Linux)
+### Option 1: pm2 + systemd (Linux)
 
 ```bash
-make install-service  # Creates systemd user service
-systemctl --user start mini-claw
-systemctl --user enable mini-claw
+make install-service  # Configures systemd to start pm2
+pm2 status
+systemctl status pm2-$USER
 ```
 
 ### Option 2: pm2

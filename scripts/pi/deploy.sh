@@ -6,7 +6,6 @@ APP_ROOT="${MINI_CLAW_APP_ROOT:-$HOME/mini-claw}"
 RELEASES_DIR="$APP_ROOT/releases"
 CURRENT_LINK="$APP_ROOT/current"
 ENV_FILE="${MINI_CLAW_ENV_FILE:-$APP_ROOT/.env}"
-SERVICE_NAME="${MINI_CLAW_SERVICE_NAME:-mini-claw}"
 VERSION=""
 RUN_BOOTSTRAP=1
 
@@ -24,7 +23,7 @@ usage() {
 Usage: $0 [--version vX.Y.Z] [--repo owner/name] [--skip-bootstrap]
 
 Downloads a Mini-Claw release from GitHub, installs dependencies on this Pi,
-runs database migrations, and restarts the user systemd service.
+runs database migrations, and reloads Mini-Claw through pm2.
 USAGE
 }
 
@@ -58,6 +57,14 @@ have_cmd() {
 	command -v "$1" >/dev/null 2>&1
 }
 
+sudo_cmd() {
+	if [ "$(id -u)" -eq 0 ]; then
+		"$@"
+	else
+		sudo "$@"
+	fi
+}
+
 load_nvm_if_present() {
 	export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 	if [ -s "$NVM_DIR/nvm.sh" ]; then
@@ -78,7 +85,7 @@ run_bootstrap_if_needed() {
 		return
 	fi
 
-	if have_cmd node && have_cmd pnpm && have_cmd pi; then
+	if have_cmd node && have_cmd pnpm && have_cmd pi && have_cmd pm2 && have_cmd codex; then
 		log "Core tools already available; skipping bootstrap"
 		load_nvm_if_present
 		return
@@ -117,28 +124,40 @@ run_migrations() {
 	pnpm db:migrate
 }
 
-install_service() {
-	local node_path
-	local service_dir="$HOME/.config/systemd/user"
-	local service_file="$service_dir/${SERVICE_NAME}.service"
+configure_pm2_systemd() {
+	local pm2_service="pm2-$USER"
 
-	have_cmd systemctl || fail "systemctl is required for service installation"
-	node_path="$(command -v node)"
-	[ -n "$node_path" ] || fail "node is not available"
+	have_cmd systemctl || fail "systemctl is required for pm2 startup"
+	have_cmd pm2 || fail "pm2 is not available"
 
-	mkdir -p "$service_dir"
-	sed \
-		-e "s|__APP_DIR__|$CURRENT_LINK|g" \
-		-e "s|__ENV_FILE__|$ENV_FILE|g" \
-		-e "s|__NODE_PATH__|$node_path|g" \
-		-e "s|__HOME__|$HOME|g" \
-		"$CURRENT_LINK/scripts/pi/mini-claw.service.template" >"$service_file"
+	if sudo_cmd systemctl cat "$pm2_service" >/dev/null 2>&1; then
+		log "Refreshing existing pm2 systemd startup service: $pm2_service"
+	else
+		log "Creating pm2 systemd startup service: $pm2_service"
+	fi
 
-	systemctl --user daemon-reload
-	systemctl --user enable "$SERVICE_NAME"
-	systemctl --user restart "$SERVICE_NAME"
+	sudo_cmd env "PATH=$PATH" pm2 startup systemd -u "$USER" --hp "$HOME"
+	sudo_cmd systemctl daemon-reload
+}
 
-	log "Service restarted: systemctl --user status $SERVICE_NAME"
+reload_pm2_apps() {
+	have_cmd pm2 || fail "pm2 is not available"
+
+	log "Starting/reloading Mini-Claw pm2 apps"
+	export MINI_CLAW_PM2_APP_ROOT="$CURRENT_LINK"
+	export MINI_CLAW_ENV_FILE="$ENV_FILE"
+	pm2 startOrReload ecosystem.config.cjs --update-env
+	pm2 save
+
+	log "pm2 is managing Mini-Claw: pm2 status"
+	log "systemd is managing pm2: systemctl status pm2-$USER"
+}
+
+enable_pm2_systemd() {
+	local pm2_service="pm2-$USER"
+
+	log "Enabling pm2 systemd startup service: $pm2_service"
+	sudo_cmd systemctl enable --now "$pm2_service"
 }
 
 main() {
@@ -177,7 +196,9 @@ main() {
 
 	install_dependencies
 	run_migrations
-	install_service
+	configure_pm2_systemd
+	reload_pm2_apps
+	enable_pm2_systemd
 
 	log "Deployed Mini-Claw $VERSION"
 	log "Manual auth remains manual: run 'pi /login' if Pi is not authenticated"

@@ -35,6 +35,7 @@ A minimalist alternative to OpenClaw - use your Claude Pro/Max or ChatGPT Plus s
 - Node.js 22+
 - pnpm
 - [Pi coding agent](https://github.com/badlogic/pi-mono) installed globally
+- pm2 and Codex installed globally for production deployment
 
 ### Installation
 
@@ -153,11 +154,12 @@ The deploy script:
 
 - installs host dependencies with `apt` when missing
 - installs `nvm`, Node.js 22, and pnpm
-- installs `@mariozechner/pi-coding-agent` when `pi` is missing
+- installs `@mariozechner/pi-coding-agent`, `pm2`, and `@openai/codex` when missing
 - downloads and extracts the release under `~/mini-claw/releases/<version>`
 - updates `~/mini-claw/current`
 - installs dependencies and runs `pnpm db:migrate`
-- installs and restarts the `mini-claw` user `systemd` service
+- creates or refreshes the generated `pm2-$USER` systemd service
+- starts or reloads `mini-claw` and `mini-claw-cron` through pm2
 
 These parts stay manual:
 
@@ -189,35 +191,36 @@ is preserved, and the service is updated to point at the new release.
 
 ### Service Management
 
-Mini-Claw runs as a user-level `systemd` service:
+systemd starts pm2 on boot, and pm2 manages both Node processes:
 
 ```bash
-systemctl --user status mini-claw
-systemctl --user restart mini-claw
-journalctl --user -u mini-claw -f
+systemctl status pm2-$USER
+pm2 status
+pm2 restart mini-claw mini-claw-cron
+pm2 logs mini-claw mini-claw-cron
 ```
 
-If services do not start after reboot, enable user lingering:
+If pm2 loses its process list after manual changes, save it again:
 
 ```bash
-sudo loginctl enable-linger "$USER"
+pm2 save
 ```
 
-### Manual systemd install from a clone
+### Manual pm2 systemd install from a clone
 
-For a cloned checkout on Linux, the older Makefile helper still works:
+For a cloned checkout on Linux:
 
 ```bash
 make install-service
-systemctl --user start mini-claw
-systemctl --user enable mini-claw
 ```
 
 ### pm2
 
 ```bash
+sudo env PATH="$PATH" pm2 startup systemd -u "$USER" --hp "$HOME"
 pnpm pm2:start
 pm2 save
+sudo systemctl enable --now pm2-$USER
 ```
 
 This starts both `mini-claw` and `mini-claw-cron` from `ecosystem.config.cjs`.

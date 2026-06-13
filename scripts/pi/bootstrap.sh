@@ -39,6 +39,7 @@ install_system_packages() {
 		g++
 		git
 		make
+		sudo
 		build-essential
 		pkg-config
 		python3
@@ -91,14 +92,58 @@ install_node_and_pnpm() {
 	corepack prepare "pnpm@$PNPM_VERSION" --activate
 }
 
-install_pi_agent() {
-	if have_cmd pi; then
-		log "pi-coding-agent already installed at $(command -v pi)"
+package_dependency_version() {
+	local package_name="$1"
+	local package_file
+
+	for package_file in "$RELEASE_ROOT/package.json" "$APP_ROOT/current/package.json" "./package.json"; do
+		if [ -f "$package_file" ]; then
+			node -e '
+const fs = require("node:fs");
+const packageFile = process.argv[1];
+const packageName = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
+const version = pkg.dependencies?.[packageName] || pkg.devDependencies?.[packageName] || "";
+process.stdout.write(version.replace(/^[~^]/, ""));
+' "$package_file" "$package_name"
+			return
+		fi
+	done
+}
+
+npm_package_spec() {
+	local install_package="$1"
+	local version_package="${2:-$install_package}"
+	local version
+
+	version="$(package_dependency_version "$version_package")"
+	if [ -n "$version" ]; then
+		printf '%s@%s' "$install_package" "$version"
+	else
+		printf '%s' "$install_package"
+	fi
+}
+
+install_global_cli() {
+	local command_name="$1"
+	local install_package="$2"
+	local version_package="${3:-$install_package}"
+	local package_spec
+
+	if have_cmd "$command_name"; then
+		log "$command_name already installed at $(command -v "$command_name")"
 		return
 	fi
 
-	log "Installing pi-coding-agent globally"
-	npm install -g @mariozechner/pi-coding-agent
+	package_spec="$(npm_package_spec "$install_package" "$version_package")"
+	log "Installing $package_spec globally for $command_name"
+	npm install -g "$package_spec"
+}
+
+install_global_tools() {
+	install_global_cli pi @mariozechner/pi-coding-agent
+	install_global_cli pm2 pm2
+	install_global_cli codex @openai/codex @openai/codex-sdk
 }
 
 prepare_directories() {
@@ -139,7 +184,7 @@ main() {
 	install_system_packages
 	install_nvm
 	install_node_and_pnpm
-	install_pi_agent
+	install_global_tools
 	prepare_directories
 	prepare_env_file
 
