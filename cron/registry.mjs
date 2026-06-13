@@ -20,9 +20,9 @@ export function writeCronRegistry(validation, dbPath = getDefaultDatabasePath())
 		const write = sqlite.transaction(() => {
 			const upsertJob = sqlite.prepare(`
 				INSERT INTO cron_jobs (
-					name, description, cronExpression, hasSeconds, scriptPath, schedulePath, contentHash, validatedAt
+					name, description, cronExpression, enabled, hasSeconds, scriptPath, schedulePath, contentHash, validatedAt
 				) VALUES (
-					@name, @description, @cronExpression, @hasSeconds, @scriptPath, @schedulePath, @contentHash, @validatedAt
+					@name, @description, @cronExpression, @enabled, @hasSeconds, @scriptPath, @schedulePath, @contentHash, @validatedAt
 				)
 				ON CONFLICT(name) DO UPDATE SET
 					description = excluded.description,
@@ -50,7 +50,7 @@ export function writeCronRegistry(validation, dbPath = getDefaultDatabasePath())
 					validatedAt = excluded.validatedAt
 			`);
 
-			for (const row of validation.jobs) upsertJob.run(row);
+			for (const row of validation.jobs) upsertJob.run({ ...row, enabled: 1 });
 			for (const row of validation.capabilities) upsertCapability.run(row);
 			deleteMissing(sqlite, "cron_jobs", "name", validation.jobs.map((row) => row.name));
 			deleteMissing(sqlite, "cron_capabilities", "slug", validation.capabilities.map((row) => row.slug));

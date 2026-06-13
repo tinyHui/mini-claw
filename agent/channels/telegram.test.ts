@@ -10,6 +10,8 @@ const {
 	mockCommand,
 	mockOn,
 	mockRestartCronPm2,
+	mockGetSqlite,
+	mockExistsSync,
 	mockEnsureSession,
 	mockResetSession,
 	MockGrammyError,
@@ -35,11 +37,17 @@ const {
 		mockCommand: vi.fn(),
 		mockOn: vi.fn(),
 		mockRestartCronPm2: vi.fn(),
+		mockGetSqlite: vi.fn(),
+		mockExistsSync: vi.fn(),
 		mockEnsureSession: vi.fn(),
 		mockResetSession: vi.fn(),
 		MockGrammyError,
 	};
 });
+
+vi.mock("node:fs", () => ({
+	existsSync: (...args: unknown[]) => mockExistsSync(...args),
+}));
 
 vi.mock("grammy", () => ({
 	GrammyError: MockGrammyError,
@@ -82,6 +90,9 @@ vi.mock("../workspace.js", () => ({ getWorkspace: vi.fn(), formatPath: vi.fn((p:
 vi.mock("../cron/pm2.js", () => ({
 	restartCronPm2: (...args: unknown[]) => mockRestartCronPm2(...args),
 }));
+vi.mock("../db.js", () => ({
+	getSqlite: () => mockGetSqlite(),
+}));
 
 import { TelegramChannel, toTelegramMarkdown, type TelegramMessageSentCallback } from "./telegram.js";
 
@@ -115,6 +126,35 @@ function apiError(desc: string) {
 	return new MockGrammyError(`Bad Request: ${desc}`, 400, `Bad Request: ${desc}`);
 }
 
+interface CronTestRow {
+	name: string;
+	description?: string;
+	cronExpression: string;
+	enabled: number;
+}
+
+function mockCronDb(rows: CronTestRow[]) {
+	const updateRun = vi.fn((enabled: number, name: string) => {
+		const row = rows.find((item) => item.name === name);
+		if (row) row.enabled = enabled;
+	});
+	const prepare = vi.fn((sql: string) => {
+		if (sql.includes("UPDATE cron_jobs SET enabled")) {
+			return { run: updateRun };
+		}
+		if (sql.includes("WHERE name = ?")) {
+			return {
+				get: (name: string) => rows.find((row) => row.name === name),
+			};
+		}
+		return {
+			all: () => rows,
+		};
+	});
+	mockGetSqlite.mockReturnValue({ prepare });
+	return { prepare, updateRun };
+}
+
 describe("TelegramChannel", () => {
 	let channel: TelegramChannel;
 	let sentCallback: ReturnType<typeof vi.fn<TelegramMessageSentCallback>>;
@@ -131,6 +171,8 @@ describe("TelegramChannel", () => {
 			stdout: "",
 			stderr: "",
 		});
+		mockCronDb([]);
+		mockExistsSync.mockReturnValue(true);
 		channel = new TelegramChannel(makeConfig());
 		sentCallback = vi.fn<TelegramMessageSentCallback>();
 		channel.onMessageSent(sentCallback);
@@ -308,25 +350,20 @@ describe("TelegramChannel", () => {
 	describe("commands", () => {
 		function commandHandler(name: string) {
 			return mockCommand.mock.calls.find((call: unknown[]) => call[0] === name)?.[1] as
-				| ((ctx: { chat: { id: number }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
+				| ((ctx: { chat: { id: number }; message?: { text: string }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
 				| undefined;
 		}
 
-		function textHandler() {
-			return mockOn.mock.calls.find((call: unknown[]) => call[0] === "message:text")?.[1] as
-				| ((ctx: { chat: { id: number }; message: { text: string; message_id: number }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
-				| undefined;
-		}
-
-		it("registers /new, /status, and /cron_restart commands", () => {
+		it("registers /new, /status, and /cron commands", () => {
 			expect(mockSetMyCommands).toHaveBeenCalledWith([
 				{ command: "new", description: "Start a new session" },
 				{ command: "status", description: "Show current session info" },
-				{ command: "cron_restart", description: "Reload cron scheduler" },
+				{ command: "cron", description: "Manage cron jobs" },
 			]);
 			expect(commandHandler("new")).toBeTypeOf("function");
 			expect(commandHandler("session")).toBeUndefined();
-			expect(commandHandler("cron_restart")).toBeTypeOf("function");
+			expect(commandHandler("cron")).toBeTypeOf("function");
+			expect(mockCommand).toHaveBeenCalledTimes(3);
 		});
 
 		it("starts a new session with /new", async () => {
@@ -337,27 +374,28 @@ describe("TelegramChannel", () => {
 			expect(reply).toHaveBeenCalledWith("New session started.");
 		});
 
-		it("restarts cron with /cron_restart", async () => {
+		it("shows /cron help when no parameter is provided", async () => {
 			const reply = vi.fn().mockResolvedValue(undefined);
-			await commandHandler("cron_restart")?.({ chat: { id: 123 }, reply });
+			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron" }, reply });
+
+			expect(reply).toHaveBeenCalledWith([
+				"Cron commands:",
+				"/cron list",
+				"/cron disable <name>",
+				"/cron enable <name>",
+				"/cron restart",
+			].join("\n"));
+		});
+
+		it("restarts cron with /cron restart", async () => {
+			const reply = vi.fn().mockResolvedValue(undefined);
+			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron restart" }, reply });
 
 			expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
 			expect(reply).toHaveBeenCalledWith("Cron scheduler restarted (mini-claw-cron).");
 		});
 
-		it("also handles /cron-restart text alias", async () => {
-			const reply = vi.fn().mockResolvedValue(undefined);
-			await textHandler()?.({
-				chat: { id: 123 },
-				message: { text: "/cron-restart", message_id: 10 },
-				reply,
-			});
-
-			expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
-			expect(reply).toHaveBeenCalledWith("Cron scheduler restarted (mini-claw-cron).");
-		});
-
-		it("reports cron restart failure", async () => {
+		it("reports cron restart failure with /cron restart", async () => {
 			mockRestartCronPm2.mockResolvedValueOnce({
 				ok: false,
 				processName: "mini-claw-cron",
@@ -367,10 +405,93 @@ describe("TelegramChannel", () => {
 				error: "not found",
 			});
 			const reply = vi.fn().mockResolvedValue(undefined);
-			await commandHandler("cron_restart")?.({ chat: { id: 123 }, reply });
+
+			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron restart" }, reply });
 
 			expect(reply).toHaveBeenCalledWith(
 				"Failed to restart cron scheduler (mini-claw-cron): not found",
+			);
+		});
+
+		it("lists cron jobs from the DB", async () => {
+			mockCronDb([
+				{ name: "digest", cronExpression: "0 8 * * *", enabled: 1 },
+				{ name: "cleanup", cronExpression: "0 1 * * *", enabled: 0 },
+			]);
+			const reply = vi.fn().mockResolvedValue(undefined);
+
+			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron list" }, reply });
+
+			expect(reply).toHaveBeenCalledWith([
+				"Cron jobs:",
+				"- digest: 0 8 * * * (enabled)",
+				"- cleanup: 0 1 * * * (disabled)",
+			].join("\n"));
+		});
+
+		it("disables a cron job and restarts the cron process", async () => {
+			const db = mockCronDb([{ name: "digest", cronExpression: "0 8 * * *", enabled: 1 }]);
+			const reply = vi.fn().mockResolvedValue(undefined);
+
+			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron disable digest" }, reply });
+
+			expect(db.updateRun).toHaveBeenCalledWith(0, "digest");
+			expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
+			expect(reply).toHaveBeenCalledWith("Cron job digest disabled. Restarted mini-claw-cron.");
+		});
+
+		it("enables a cron job when its script file exists", async () => {
+			const db = mockCronDb([{ name: "digest", cronExpression: "0 8 * * *", enabled: 0 }]);
+			mockExistsSync.mockReturnValueOnce(true);
+			const reply = vi.fn().mockResolvedValue(undefined);
+
+			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron enable digest" }, reply });
+
+			expect(mockExistsSync).toHaveBeenCalledWith("/app/cron/jobs/digest.mjs");
+			expect(db.updateRun).toHaveBeenCalledWith(1, "digest");
+			expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
+			expect(reply).toHaveBeenCalledWith("Cron job digest enabled. Restarted mini-claw-cron.");
+		});
+
+		it("rejects enabling a cron job when its script file is missing", async () => {
+			const db = mockCronDb([{ name: "digest", cronExpression: "0 8 * * *", enabled: 0 }]);
+			mockExistsSync.mockReturnValueOnce(false);
+			const reply = vi.fn().mockResolvedValue(undefined);
+
+			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron enable digest" }, reply });
+
+			expect(db.updateRun).not.toHaveBeenCalled();
+			expect(mockRestartCronPm2).not.toHaveBeenCalled();
+			expect(reply).toHaveBeenCalledWith("Cannot enable digest: cron/jobs/digest.mjs was not found.");
+		});
+
+		it("does not restart when a cron job name is not found", async () => {
+			mockCronDb([]);
+			const reply = vi.fn().mockResolvedValue(undefined);
+
+			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron disable missing" }, reply });
+
+			expect(mockRestartCronPm2).not.toHaveBeenCalled();
+			expect(reply).toHaveBeenCalledWith("Cron job not found: missing");
+		});
+
+		it("reports restart failure after updating cron job status", async () => {
+			const db = mockCronDb([{ name: "digest", cronExpression: "0 8 * * *", enabled: 1 }]);
+			mockRestartCronPm2.mockResolvedValueOnce({
+				ok: false,
+				processName: "mini-claw-cron",
+				command: "pm2 restart mini-claw-cron",
+				stdout: "",
+				stderr: "not found",
+				error: "not found",
+			});
+			const reply = vi.fn().mockResolvedValue(undefined);
+
+			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron disable digest" }, reply });
+
+			expect(db.updateRun).toHaveBeenCalledWith(0, "digest");
+			expect(reply).toHaveBeenCalledWith(
+				"Cron job digest disabled, but failed to restart mini-claw-cron: not found",
 			);
 		});
 	});

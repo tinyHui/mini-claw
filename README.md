@@ -82,7 +82,8 @@ make test       # Run tests
 | `/shell <cmd>` | Run shell command directly         |
 | `/new`         | Start fresh session (archives old) |
 | `/status`      | Show bot status                    |
-| `/cron-restart` | Reload the pm2 cron scheduler     |
+| `/cron`        | List, enable, or disable cron jobs |
+| `/cron restart` | Reload the pm2 cron scheduler     |
 
 ## Configuration
 

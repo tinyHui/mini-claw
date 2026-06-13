@@ -320,19 +320,3 @@ export async function generateCronArtifacts(
 		pm2Restart,
 	};
 }
-
-export function describeCronRegistry(context = readCronRegistryContext()): string {
-	if (context.jobs.length === 0 && context.capabilities.length === 0) {
-		return "No cron artifacts are registered yet.";
-	}
-	const lines = [
-		...context.jobs.map((job) => `job ${job.name}: ${job.description} (${job.cronExpression})`),
-		...context.capabilities.map((capability) => `capability ${capability.slug}: ${capability.description}`),
-	];
-	return lines.join("\n");
-}
-
-export function formatGeneratedFiles(files: string[]): string {
-	if (files.length === 0) return "No file changes were reported.";
-	return files.map((file) => `- ${join("cron", file)}`).join("\n");
-}

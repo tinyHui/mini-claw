@@ -141,6 +141,7 @@ release-package:
 	rm -rf "$$PACKAGE_DIR/cron/output" ; \
 	cp -R skills "$$PACKAGE_DIR/skills" ; \
 	cp -R drizzle "$$PACKAGE_DIR/drizzle" ; \
+	rm -f "$$PACKAGE_DIR/drizzle/meta/_journal.json" ; \
 	cp -R scripts "$$PACKAGE_DIR/scripts" ; \
 	cp package.json pnpm-lock.yaml pnpm-workspace.yaml Makefile README.md .env.example drizzle.config.ts tsconfig.json ecosystem.config.cjs "$$PACKAGE_DIR/" ; \
 	cp agent/db/schema.ts "$$PACKAGE_DIR/agent/db/schema.ts" ; \

@@ -1,6 +1,9 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { Bot, Context, GrammyError } from "grammy";
 import type { Config } from "../config.js";
 import { restartCronPm2 } from "../cron/pm2.js";
+import { getSqlite } from "../db.js";
 import { logger, withLogContext } from "../logger.js";
 import { checkRateLimit } from "../rate-limiter.js";
 import { ensureSession, resetSession } from "../session-repository.js";
@@ -24,8 +27,19 @@ export type TelegramMessageSentCallback = (
 	status: DeliveryStatus,
 ) => Promise<void>;
 
-function isCommandText(text: string, command: string): boolean {
-	return text === `/${command}` || text.startsWith(`/${command}@`);
+interface CronCommandJobRow {
+	name: string;
+	cronExpression: string;
+	enabled: number;
+}
+
+interface CronCommandJobLookupRow extends CronCommandJobRow {
+	description: string;
+}
+
+function parseCronCommandArgs(text?: string): string[] {
+	const args = (text ?? "").replace(/^\/cron(?:@\S+)?/, "").trim();
+	return args ? args.split(/\s+/) : [];
 }
 
 export class TelegramChannel {
@@ -171,7 +185,7 @@ export class TelegramChannel {
 		const commands = [
 			{ command: "new", description: "Start a new session" },
 			{ command: "status", description: "Show current session info" },
-			{ command: "cron_restart", description: "Reload cron scheduler" },
+			{ command: "cron", description: "Manage cron jobs" },
 		];
 		this.bot.api.setMyCommands(commands).catch(() => {});
 
@@ -190,8 +204,12 @@ export class TelegramChannel {
 			await ctx.reply("New session started.");
 		});
 
-		this.bot.command("cron_restart", async (ctx) => {
-			await this.restartCronFromCommand(String(ctx.chat.id), ctx.reply.bind(ctx));
+		this.bot.command("cron", async (ctx) => {
+			await this.handleCronCommand(
+				String(ctx.chat.id),
+				ctx.message?.text,
+				ctx.reply.bind(ctx),
+			);
 		});
 
 		this.bot.command("status", async (ctx) => {
@@ -204,10 +222,6 @@ export class TelegramChannel {
 
 		this.bot.on("message:text", async (ctx) => {
 			const text = ctx.message.text;
-			if (isCommandText(text, "cron-restart")) {
-				await this.restartCronFromCommand(String(ctx.chat.id), ctx.reply.bind(ctx));
-				return;
-			}
 			if (text.startsWith("/")) return;
 
 			const rateLimit = checkRateLimit(
@@ -253,7 +267,7 @@ export class TelegramChannel {
 	): Promise<void> {
 		await withLogContext(
 			{
-				operation: "cron_restart",
+				operation: "cron_scheduler_restart",
 				chatId,
 			},
 			async () => {
@@ -268,6 +282,114 @@ export class TelegramChannel {
 					});
 					await reply(
 						`Failed to restart cron scheduler (${result.processName}): ${errorMessage}`,
+					);
+				}
+			},
+		);
+	}
+
+	private async handleCronCommand(
+		chatId: string,
+		text: string | undefined,
+		reply: (text: string) => Promise<unknown>,
+	): Promise<void> {
+		const [action, name] = parseCronCommandArgs(text);
+		if (!action) {
+			await reply(this.formatCronHelp());
+			return;
+		}
+
+		if (action === "list") {
+			await reply(this.formatCronList());
+			return;
+		}
+
+		if (action === "restart") {
+			await this.restartCronFromCommand(chatId, reply);
+			return;
+		}
+
+		if ((action === "disable" || action === "enable") && name) {
+			await this.setCronEnabledFromCommand(chatId, reply, name, action === "enable");
+			return;
+		}
+
+		await reply(this.formatCronHelp());
+	}
+
+	private formatCronHelp(): string {
+		return [
+			"Cron commands:",
+			"/cron list",
+			"/cron disable <name>",
+			"/cron enable <name>",
+			"/cron restart",
+		].join("\n");
+	}
+
+	private formatCronList(): string {
+		const rows = getSqlite().prepare(`
+			SELECT name, cronExpression, enabled
+			FROM cron_jobs
+			ORDER BY name
+		`).all() as CronCommandJobRow[];
+
+		if (rows.length === 0) return "No cron jobs registered.";
+
+		return [
+			"Cron jobs:",
+			...rows.map((row) => `- ${row.name}: ${row.cronExpression} (${row.enabled === 1 ? "enabled" : "disabled"})`),
+		].join("\n");
+	}
+
+	private getCronJob(name: string): CronCommandJobLookupRow | undefined {
+		return getSqlite().prepare(`
+			SELECT name, description, cronExpression, enabled
+			FROM cron_jobs
+			WHERE name = ?
+		`).get(name) as CronCommandJobLookupRow | undefined;
+	}
+
+	private cronJobScriptExists(name: string): boolean {
+		return existsSync(join(this.config.cronDir, "jobs", `${name}.mjs`));
+	}
+
+	private async setCronEnabledFromCommand(
+		chatId: string,
+		reply: (text: string) => Promise<unknown>,
+		name: string,
+		enabled: boolean,
+	): Promise<void> {
+		await withLogContext(
+			{
+				operation: enabled ? "cron_enable" : "cron_disable",
+				chatId,
+				jobName: name,
+			},
+			async () => {
+				const job = this.getCronJob(name);
+				if (!job) {
+					await reply(`Cron job not found: ${name}`);
+					return;
+				}
+
+				if (enabled && !this.cronJobScriptExists(name)) {
+					await reply(`Cannot enable ${name}: cron/jobs/${name}.mjs was not found.`);
+					return;
+				}
+
+				getSqlite().prepare("UPDATE cron_jobs SET enabled = ? WHERE name = ?").run(enabled ? 1 : 0, name);
+				const result = await restartCronPm2({ appRoot: this.config.appRoot });
+				if (result.ok) {
+					logger.info(enabled ? "Enabled cron job and restarted cron process" : "Disabled cron job and restarted cron process");
+					await reply(`Cron job ${name} ${enabled ? "enabled" : "disabled"}. Restarted ${result.processName}.`);
+				} else {
+					const errorMessage = result.error ?? (result.stderr || "unknown error");
+					logger.warn("Failed to restart cron process after cron job status update", {
+						error: errorMessage,
+					});
+					await reply(
+						`Cron job ${name} ${enabled ? "enabled" : "disabled"}, but failed to restart ${result.processName}: ${errorMessage}`,
 					);
 				}
 			},

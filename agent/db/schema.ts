@@ -28,6 +28,7 @@ export const cronJobs = sqliteTable("cron_jobs", {
 	name: text("name").primaryKey().notNull(),
 	description: text("description").notNull(),
 	cronExpression: text("cronExpression").notNull(),
+	enabled: integer("enabled").notNull().default(1),
 	hasSeconds: integer("hasSeconds").notNull().default(0),
 	scriptPath: text("scriptPath").notNull(),
 	schedulePath: text("schedulePath").notNull(),

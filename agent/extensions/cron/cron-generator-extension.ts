@@ -1,13 +1,15 @@
 import { defineTool, type ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import type { Config } from "../../config.js";
-import {
-	formatGeneratedFiles,
-	generateCronArtifacts,
-} from "../../cron/generator.js";
+import { generateCronArtifacts } from "../../cron/generator.js";
 
 export interface CronGeneratorExtensionOptions {
 	config: Config;
+}
+
+function formatGeneratedFiles(files: string[]): string {
+	if (files.length === 0) return "No file changes were reported.";
+	return files.map((file) => `- cron/${file}`).join("\n");
 }
 
 export function createCronGeneratorExtensionFactory(

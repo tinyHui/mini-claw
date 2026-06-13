@@ -93,9 +93,9 @@ describe("cron validator", () => {
 		const sqlite = new Database(join(root, "miniclaw.db"));
 		sqlite.prepare(`
 			INSERT INTO cron_jobs (
-				name, description, cronExpression, hasSeconds, scriptPath, schedulePath, contentHash, validatedAt
+				name, description, cronExpression, enabled, hasSeconds, scriptPath, schedulePath, contentHash, validatedAt
 			) VALUES (
-				'stale', 'Stale', '0 1 * * *', 0, 'cron/jobs/stale.mjs', 'cron/jobs/stale.cron', 'old', '2026-01-01T00:00:00.000Z'
+				'stale', 'Stale', '0 1 * * *', 1, 0, 'cron/jobs/stale.mjs', 'cron/jobs/stale.cron', 'old', '2026-01-01T00:00:00.000Z'
 			)
 		`).run();
 		sqlite.prepare(`
@@ -118,13 +118,14 @@ describe("cron validator", () => {
 		expect(result.json.counts.capabilities).toBe(1);
 
 		const verified = new Database(join(root, "miniclaw.db"));
-		const jobs = verified.prepare("SELECT name, description, cronExpression, hasSeconds FROM cron_jobs").all();
+		const jobs = verified.prepare("SELECT name, description, cronExpression, enabled, hasSeconds FROM cron_jobs").all();
 		const capabilities = verified.prepare("SELECT slug, name, description FROM cron_capabilities").all();
 		verified.close();
 		expect(jobs).toEqual([{
 			name: "digest",
 			description: "digest job",
 			cronExpression: "0 8 * * *",
+			enabled: 1,
 			hasSeconds: 0,
 		}]);
 		expect(capabilities).toEqual([{
@@ -132,6 +133,32 @@ describe("cron validator", () => {
 			name: "summary",
 			description: "Summarises text for cron jobs.",
 		}]);
+	});
+
+	it("keeps existing disabled jobs disabled when writing scanned registry rows", async () => {
+		createMigratedDatabase(join(root, "miniclaw.db"));
+		await writeValidJob(root);
+		const sqlite = new Database(join(root, "miniclaw.db"));
+		sqlite.prepare(`
+			INSERT INTO cron_jobs (
+				name, description, cronExpression, enabled, hasSeconds, scriptPath, schedulePath, contentHash, validatedAt
+			) VALUES (
+				'digest', 'Old digest', '0 1 * * *', 0, 0, 'cron/jobs/digest.mjs', 'cron/jobs/digest.cron', 'old', '2026-01-01T00:00:00.000Z'
+			)
+		`).run();
+		sqlite.close();
+
+		const result = await runValidator(root, true);
+
+		expect(result.exitCode).toBe(0);
+		const verified = new Database(join(root, "miniclaw.db"));
+		const job = verified.prepare("SELECT name, cronExpression, enabled FROM cron_jobs WHERE name = 'digest'").get();
+		verified.close();
+		expect(job).toEqual({
+			name: "digest",
+			cronExpression: "0 8 * * *",
+			enabled: 0,
+		});
 	});
 
 	it("reports missing schedules", async () => {

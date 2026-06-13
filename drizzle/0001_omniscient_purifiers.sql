@@ -14,6 +14,7 @@ CREATE TABLE `cron_jobs` (
 	`name` text PRIMARY KEY NOT NULL,
 	`description` text NOT NULL,
 	`cronExpression` text NOT NULL,
+	`enabled` integer DEFAULT 1 NOT NULL,
 	`hasSeconds` integer DEFAULT 0 NOT NULL,
 	`scriptPath` text NOT NULL,
 	`schedulePath` text NOT NULL,

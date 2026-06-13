@@ -1,21 +1,69 @@
 import Bree from "bree";
+import Database from "better-sqlite3";
+import { stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { scanCapabilities, scanCronJobs } from "./scanner.mjs";
+import { getCronJobsDir, scanCapabilities } from "./scanner.mjs";
 import { logger } from "./logger.mjs";
 
 const cronRuntimeDir = dirname(fileURLToPath(import.meta.url));
 const genericRunnerPath = resolve(cronRuntimeDir, "generic-runner.mjs");
 
+function getDefaultDatabasePath() {
+	return resolve(process.cwd(), "miniclaw.db");
+}
+
+async function pathExists(path) {
+	try {
+		await stat(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function readEnabledCronJobs(cronDir, dbPath = getDefaultDatabasePath()) {
+	const sqlite = new Database(dbPath, { fileMustExist: true });
+	try {
+		const rows = sqlite.prepare(`
+			SELECT name, description, cronExpression, enabled, hasSeconds, scriptPath, schedulePath, contentHash, validatedAt
+			FROM cron_jobs
+			WHERE enabled = 1
+			ORDER BY name
+		`).all();
+		const jobsDir = getCronJobsDir(cronDir);
+		const enabledRows = [];
+
+		for (const row of rows) {
+			const scriptPath = resolve(jobsDir, `${row.name}.mjs`);
+			if (await pathExists(scriptPath)) {
+				enabledRows.push(row);
+				continue;
+			}
+
+			sqlite.prepare("UPDATE cron_jobs SET enabled = 0 WHERE name = ?").run(row.name);
+			logger.warn("Disabled cron job because its script file is missing", {
+				operation: "cron_job_disabled_missing_file",
+				jobName: row.name,
+				file: scriptPath,
+			});
+		}
+
+		return enabledRows;
+	} finally {
+		sqlite.close();
+	}
+}
+
 export async function buildCronScheduler(options) {
-	const [jobResult, capabilityResult] = await Promise.all([
-		scanCronJobs(options.cronDir),
+	const [jobs, capabilityResult] = await Promise.all([
+		readEnabledCronJobs(options.cronDir, options.dbPath),
 		scanCapabilities(options.cronDir),
 	]);
-	const diagnostics = [
-		...jobResult.diagnostics.map((diagnostic) => ({ ...diagnostic, operation: "cron_job_scan" })),
-		...capabilityResult.diagnostics.map((diagnostic) => ({ ...diagnostic, operation: "cron_capability_scan" })),
-	];
+	const diagnostics = capabilityResult.diagnostics.map((diagnostic) => ({
+		...diagnostic,
+		operation: "cron_capability_scan",
+	}));
 
 	for (const diagnostic of diagnostics) {
 		const context = {
@@ -32,7 +80,7 @@ export async function buildCronScheduler(options) {
 	logger.info("Cron scheduler scan completed", {
 		operation: "cron_scan",
 		cronDir: options.cronDir,
-		cronJobCount: jobResult.rows.length,
+		cronJobCount: jobs.length,
 		capabilityCount: capabilityResult.rows.length,
 		diagnosticErrorCount: diagnostics.filter((diagnostic) => diagnostic.level === "error").length,
 		diagnosticWarningCount: diagnostics.filter((diagnostic) => diagnostic.level === "warn").length,
@@ -41,7 +89,7 @@ export async function buildCronScheduler(options) {
 	const bree = new Bree({
 		root: false,
 		logger: console,
-		jobs: jobResult.rows.map((job) => ({
+		jobs: jobs.map((job) => ({
 			name: job.name,
 			path: genericRunnerPath,
 			cron: job.cronExpression,
@@ -55,7 +103,7 @@ export async function buildCronScheduler(options) {
 		})),
 	});
 
-	return { bree, jobs: jobResult.rows, capabilities: capabilityResult.rows };
+	return { bree, jobs, capabilities: capabilityResult.rows };
 }
 
 export async function startCronScheduler(options) {

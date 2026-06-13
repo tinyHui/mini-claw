@@ -33,6 +33,7 @@ coverage/
 .workspace/
 .sessions/
 miniclaw.db
+miniclaw.db*
 miniclaw.db-shm
 miniclaw.db-wal
 *.tar.gz
@@ -41,6 +42,7 @@ cron/**/*.yaml
 cron/**/*.cron
 cron/**/*.mjs
 !cron/*.mjs
+drizzle/meta/_journal.json
 
 # reference project
 hermes-agent/
