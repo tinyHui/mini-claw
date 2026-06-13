@@ -3,7 +3,8 @@ import Database from "better-sqlite3";
 import { stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getCronJobsDir, scanCapabilities } from "./scanner.mjs";
+import { writeCronRegistry } from "./registry.mjs";
+import { getCronJobsDir, validateCronRuntime } from "./scanner.mjs";
 import { logger } from "./logger.mjs";
 
 const cronRuntimeDir = dirname(fileURLToPath(import.meta.url));
@@ -41,9 +42,9 @@ async function readEnabledCronJobs(cronDir, dbPath = getDefaultDatabasePath()) {
 				continue;
 			}
 
-			sqlite.prepare("UPDATE cron_jobs SET enabled = 0 WHERE name = ?").run(row.name);
-			logger.warn("Disabled cron job because its script file is missing", {
-				operation: "cron_job_disabled_missing_file",
+			sqlite.prepare("DELETE FROM cron_jobs WHERE name = ?").run(row.name);
+			logger.warn("Deleted cron job registry row because its script file is missing", {
+				operation: "cron_job_deleted_missing_file",
 				jobName: row.name,
 				file: scriptPath,
 			});
@@ -55,20 +56,11 @@ async function readEnabledCronJobs(cronDir, dbPath = getDefaultDatabasePath()) {
 	}
 }
 
-export async function buildCronScheduler(options) {
-	const [jobs, capabilityResult] = await Promise.all([
-		readEnabledCronJobs(options.cronDir, options.dbPath),
-		scanCapabilities(options.cronDir),
-	]);
-	const diagnostics = capabilityResult.diagnostics.map((diagnostic) => ({
-		...diagnostic,
-		operation: "cron_capability_scan",
-	}));
-
-	for (const diagnostic of diagnostics) {
+function logValidationDiagnostics(validation) {
+	for (const diagnostic of [...validation.errors, ...validation.warnings]) {
 		const context = {
 			file: diagnostic.file,
-			operation: diagnostic.operation,
+			operation: diagnostic.type ? `cron_${diagnostic.type}_scan` : "cron_scan",
 		};
 		if (diagnostic.level === "error") {
 			logger.error(diagnostic.message, undefined, context);
@@ -76,14 +68,35 @@ export async function buildCronScheduler(options) {
 			logger.warn(diagnostic.message, context);
 		}
 	}
+}
+
+export async function buildCronScheduler(options) {
+	const validation = await validateCronRuntime(resolve(options.cronDir));
+	logValidationDiagnostics(validation);
+
+	logger.info("Cron file validation completed", {
+		operation: "cron_validation",
+		cronDir: options.cronDir,
+		cronJobCount: validation.jobs.length,
+		capabilityCount: validation.capabilities.length,
+		diagnosticErrorCount: validation.errors.length,
+		diagnosticWarningCount: validation.warnings.length,
+	});
+
+	if (!validation.ok) {
+		throw new Error("Cron scheduler startup failed because cron files did not pass validation.");
+	}
+
+	const registry = writeCronRegistry(validation, options.dbPath);
+	const jobs = await readEnabledCronJobs(options.cronDir, options.dbPath);
 
 	logger.info("Cron scheduler scan completed", {
 		operation: "cron_scan",
 		cronDir: options.cronDir,
 		cronJobCount: jobs.length,
-		capabilityCount: capabilityResult.rows.length,
-		diagnosticErrorCount: diagnostics.filter((diagnostic) => diagnostic.level === "error").length,
-		diagnosticWarningCount: diagnostics.filter((diagnostic) => diagnostic.level === "warn").length,
+		capabilityCount: validation.capabilities.length,
+		registryJobCount: registry.jobsWritten,
+		registryCapabilityCount: registry.capabilitiesWritten,
 	});
 
 	const bree = new Bree({
@@ -103,7 +116,7 @@ export async function buildCronScheduler(options) {
 		})),
 	});
 
-	return { bree, jobs, capabilities: capabilityResult.rows };
+	return { bree, jobs, capabilities: validation.capabilities };
 }
 
 export async function startCronScheduler(options) {

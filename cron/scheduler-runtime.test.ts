@@ -89,7 +89,7 @@ describe("cron scheduler runtime", () => {
 		expect(built.jobs).toEqual([]);
 	});
 
-	it("disables and skips enabled DB jobs when the script file is missing", async () => {
+	it("deletes and skips enabled DB jobs when the script file is missing", async () => {
 		insertCronJob(root, "missing", 1);
 		// @ts-expect-error cron runtime modules are plain JavaScript executed by Node.
 		const { buildCronScheduler } = await import("./scheduler-runtime.mjs");
@@ -100,10 +100,10 @@ describe("cron scheduler runtime", () => {
 		});
 
 		const sqlite = new Database(join(root, "miniclaw.db"));
-		const row = sqlite.prepare("SELECT enabled FROM cron_jobs WHERE name = 'missing'").get() as { enabled: number };
+		const row = sqlite.prepare("SELECT enabled FROM cron_jobs WHERE name = 'missing'").get();
 		sqlite.close();
 
 		expect(built.bree.config.jobs).toEqual([]);
-		expect(row.enabled).toBe(0);
+		expect(row).toBeUndefined();
 	});
 });
