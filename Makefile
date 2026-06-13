@@ -135,7 +135,7 @@ release-package:
 	PACKAGE_DIR="mini-claw-$$VERSION" ; \
 	ARTIFACT="mini-claw-$$VERSION.tar.gz" ; \
 	rm -rf "$$PACKAGE_DIR" "$$ARTIFACT" ; \
-	mkdir -p "$$PACKAGE_DIR/src/db" ; \
+	mkdir -p "$$PACKAGE_DIR/agent/db" ; \
 	cp -R dist "$$PACKAGE_DIR/dist" ; \
 	cp -R cron "$$PACKAGE_DIR/cron" ; \
 	rm -rf "$$PACKAGE_DIR/cron/output" ; \
@@ -143,7 +143,7 @@ release-package:
 	cp -R drizzle "$$PACKAGE_DIR/drizzle" ; \
 	cp -R scripts "$$PACKAGE_DIR/scripts" ; \
 	cp package.json pnpm-lock.yaml pnpm-workspace.yaml Makefile README.md .env.example drizzle.config.ts tsconfig.json ecosystem.config.cjs "$$PACKAGE_DIR/" ; \
-	cp src/db/schema.ts "$$PACKAGE_DIR/src/db/schema.ts" ; \
+	cp agent/db/schema.ts "$$PACKAGE_DIR/agent/db/schema.ts" ; \
 	find "$$PACKAGE_DIR/dist" -name "*.test.*" -delete ; \
 	find "$$PACKAGE_DIR/dist" -name "test-database.*" -delete ; \
 	tar -czf "$$ARTIFACT" "$$PACKAGE_DIR" ; \

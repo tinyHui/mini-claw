@@ -9,7 +9,7 @@
   },
   "scripts": {
     "pi": "pi",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch agent/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "cron": "node cron/scheduler.mjs",
@@ -20,7 +20,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/",
+    "lint": "eslint agent/",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

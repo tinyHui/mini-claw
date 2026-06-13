@@ -6,7 +6,7 @@
  *
  * **Lifecycle**
  * - `ensureSandboxInitialized` / `resetSandbox` / `isSandboxReady` — `SandboxManager` is
- *   initialized once at bot startup (see `src/index.ts`). Unsupported platforms or init
+ *   initialized once at bot startup (see `agent/index.ts`). Unsupported platforms or init
  *   failures skip sandboxing; the agent still runs without these extensions.
  * - Per Telegram session, `pi-runner` builds an isolated cwd under
  *   `MINI_CLAW_SESSION_DIR/<sessionId>/` and passes `createSandboxExtensionFactory(isolatedWorkspace)`

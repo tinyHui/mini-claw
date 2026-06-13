@@ -7,7 +7,7 @@ Lightweight Telegram bot for persistent AI conversations using Pi coding agent.
 - **Simple**: Minimal dependencies, single-purpose
 - **Persistent**: Long-running conversations with session management
 - **Subscription-friendly**: Use Claude Pro/Max or ChatGPT Plus via OAuth (no API costs)
-- **Platform-agnostic core**: The database layer, repositories, and AI processor must not reference any specific messaging platform (Telegram, Discord, etc.). Use generic terms like `sessionId`, `platformMsgId`, and `channelId` instead of platform-specific names. Only the adapter layer (e.g. `src/channels/telegram.ts`) is allowed to contain platform-specific code.
+- **Platform-agnostic core**: The database layer, repositories, and AI processor must not reference any specific messaging platform (Telegram, Discord, etc.). Use generic terms like `sessionId`, `platformMsgId`, and `channelId` instead of platform-specific names. Only the adapter layer (e.g. `agent/channels/telegram.ts`) is allowed to contain platform-specific code.
 
 ## Tech Stack
 
@@ -30,9 +30,9 @@ Lightweight Telegram bot for persistent AI conversations using Pi coding agent.
                            └── messages
 ```
 
-### Channel Interface (`src/channels/channel.ts`)
+### Channel Interface (`agent/channels/channel.ts`)
 
-All messaging platforms are abstracted behind the `Channel` interface. Only the concrete adapter (e.g. `src/channels/telegram.ts`) contains platform-specific code.
+All messaging platforms are abstracted behind the `Channel` interface. Only the concrete adapter (e.g. `agent/channels/telegram.ts`) contains platform-specific code.
 
 | Method | Description |
 |---|---|
@@ -42,7 +42,7 @@ All messaging platforms are abstracted behind the `Channel` interface. Only the 
 | `updateOrSendMessage(sessionId, content, platformMsgId?)` | Delivers the final response: edits the ack message in place when `platformMsgId` is provided, otherwise sends a new message. Falls back to a new message if the edit fails. Fires `onMessageSent` once delivered. |
 | `start()` / `stop()` | Channel lifecycle |
 
-### Callback-Driven Workflow (`src/index.ts`)
+### Callback-Driven Workflow (`agent/index.ts`)
 
 ```
 channel receives message
@@ -62,8 +62,8 @@ channel receives message
 
 ### Adding a New Channel
 
-1. Create `src/channels/<platform>.ts` implementing `Channel`
-2. Instantiate it in `src/index.ts` and register `onMessage` + `onMessageSent`
+1. Create `agent/channels/<platform>.ts` implementing `Channel`
+2. Instantiate it in `agent/index.ts` and register `onMessage` + `onMessageSent`
 3. `sendAckMessage` may return `undefined` if the platform has no ack concept — the rest of the workflow handles both cases
 4. No changes required to repositories, DB, or Pi runner
 
@@ -76,7 +76,7 @@ mini-claw/
 ├── package.json
 ├── tsconfig.json
 ├── .env.example                 # Environment template
-├── src/
+├── agent/
 │   ├── index.ts                 # Entry point & workflow orchestration
 │   ├── channels/
 │   │   ├── channel.ts           # Channel interface (platform-agnostic)
