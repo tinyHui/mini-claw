@@ -4,12 +4,6 @@ import { restartCronPm2 } from "../cron/pm2.js";
 import { getJobScriptPath } from "../../cron/paths.js";
 import { getSqlite } from "../db.js";
 import { logger, withLogContext } from "../logger.js";
-import {
-	applyPendingMemoryProposal,
-	getMemoryStatus,
-	listPendingMemoryProposals,
-	rejectMemoryProposal,
-} from "../memory/proposals.js";
 import type { MemoryReviewRunResult } from "../memory/worker.js";
 import { ensureSession, resetSession } from "../session-repository.js";
 import { formatPath, getWorkspace } from "../workspace.js";
@@ -124,12 +118,8 @@ export class CommandProcessor implements TelegramProcessor {
 		update: Extract<IncomingTelegramUpdate, { kind: "command" }>,
 		context: ProcessorContext,
 	): Promise<ProcessorResult> {
-		const [action, id] = update.args;
+		const [action] = update.args;
 		if (!action) return { content: this.formatMemoryHelp() };
-
-		if (action === "pending") {
-			return { content: this.formatPendingMemoryProposals() };
-		}
 
 		if (action === "status") {
 			return { content: this.formatMemoryStatus(context) };
@@ -137,20 +127,6 @@ export class CommandProcessor implements TelegramProcessor {
 
 		if (action === "run") {
 			return { content: await this.runMemoryReviewFromCommand(context) };
-		}
-
-		if (action === "approve" && id) {
-			const result = await applyPendingMemoryProposal(context.config.workspace, id);
-			return {
-				content: result ? `Approved memory proposal ${id}.` : `Pending memory proposal not found: ${id}`,
-			};
-		}
-
-		if (action === "reject" && id) {
-			const rejected = rejectMemoryProposal(id);
-			return {
-				content: rejected ? `Rejected memory proposal ${id}.` : `Pending memory proposal not found: ${id}`,
-			};
 		}
 
 		return { content: this.formatMemoryHelp() };
@@ -187,7 +163,6 @@ export class CommandProcessor implements TelegramProcessor {
 	}
 
 	private async runMemoryReviewFromCommand(context: ProcessorContext): Promise<string> {
-		const log = ["Starting manual memory review."];
 		await context.progress.step({
 			type: "memory",
 			description: "Starting manual memory review",
@@ -195,17 +170,15 @@ export class CommandProcessor implements TelegramProcessor {
 		});
 
 		if (!context.memoryWorker) {
-			log.push("Memory review worker is unavailable.");
 			await context.progress.step({
 				type: "memory",
 				description: "Memory review worker unavailable",
 				key: "memory:unavailable",
 			});
-			return this.formatMemoryRunLog(log);
+			return "Memory review worker is unavailable.";
 		}
 
 		const result = await context.memoryWorker.runOnce(async (message) => {
-			log.push(message);
 			await context.progress.step({
 				type: this.progressTypeForMemoryMessage(message),
 				description: this.formatMemoryProgressDescription(message),
@@ -213,23 +186,12 @@ export class CommandProcessor implements TelegramProcessor {
 			});
 		});
 
-		log.push(this.formatMemoryRunResult(result));
-		return this.formatMemoryRunLog(log);
-	}
-
-	private formatMemoryRunLog(log: string[]): string {
-		return [
-			"Memory review run:",
-			...log.map((line) => `- ${line}`),
-		].join("\n");
+		return this.formatMemoryRunResult(result);
 	}
 
 	private formatMemoryRunResult(result: MemoryReviewRunResult): string {
 		if (result.status === "completed") {
-			return [
-				`Completed: reviewed ${result.reviewedMessages} message${result.reviewedMessages === 1 ? "" : "s"}.`,
-				`Applied ${result.accepted}, staged ${result.staged}, rejected ${result.rejected}.`,
-			].join(" ");
+			return result.report ?? `Processed ${result.reviewedMessages} message${result.reviewedMessages === 1 ? "" : "s"}.`;
 		}
 		if (result.status === "failed") {
 			return `Failed: ${result.error ?? "unknown error"}.`;
@@ -263,36 +225,16 @@ export class CommandProcessor implements TelegramProcessor {
 		return [
 			"Memory commands:",
 			"/memory status",
-			"/memory pending",
-			"/memory approve <id>",
-			"/memory reject <id>",
 			"/memory run",
 		].join("\n");
 	}
 
-	private formatPendingMemoryProposals(): string {
-		const rows = listPendingMemoryProposals();
-		if (rows.length === 0) return "No pending memory proposals.";
-		return [
-			"Pending memory proposals:",
-			...rows.map((row) => [
-				`- ${row.id.slice(0, 8)} (${row.target})`,
-				`  ${row.entry}`,
-				`  Rationale: ${row.rationale}`,
-			].join("\n")),
-		].join("\n");
-	}
-
 	private formatMemoryStatus(context: ProcessorContext): string {
-		const status = getMemoryStatus();
 		return [
 			"Memory review:",
 			`- Enabled: ${context.config.memoryReviewEnabled ? "yes" : "no"}`,
 			`- Interval: ${context.config.memoryReviewIntervalMs}ms`,
 			`- Batch limit: ${context.config.memoryReviewBatchLimit}`,
-			`- Pending: ${status.pending}`,
-			`- Applied: ${status.applied}`,
-			`- Rejected: ${status.rejected}`,
 			`- Last review: ${context.memoryWorker?.getLastReviewAt() ?? "never"}`,
 		].join("\n");
 	}

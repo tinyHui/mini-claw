@@ -10,9 +10,9 @@ import { reviewMemoryBatch } from "./reviewer.js";
 export interface MemoryReviewRunResult {
 	status: "disabled" | "already_running" | "no_messages" | "completed" | "failed";
 	reviewedMessages: number;
-	accepted: number;
-	staged: number;
-	rejected: number;
+	updatedMemory: boolean;
+	updatedUser: boolean;
+	report?: string;
 	error?: string;
 }
 
@@ -57,11 +57,11 @@ export async function runMemoryReviewOnce(
 	const onProgress = options.onProgress;
 	if (!config.memoryReviewEnabled) {
 		await emit(onProgress, "Memory review is disabled.");
-		return { status: "disabled", reviewedMessages: 0, accepted: 0, staged: 0, rejected: 0 };
+		return { status: "disabled", reviewedMessages: 0, updatedMemory: false, updatedUser: false };
 	}
 	if (running) {
 		await emit(onProgress, "A memory review is already running.");
-		return { status: "already_running", reviewedMessages: 0, accepted: 0, staged: 0, rejected: 0 };
+		return { status: "already_running", reviewedMessages: 0, updatedMemory: false, updatedUser: false };
 	}
 	running = true;
 	try {
@@ -75,7 +75,7 @@ export async function runMemoryReviewOnce(
 		});
 		if (messages.length === 0) {
 			await emit(onProgress, "No processed messages need review.");
-			return { status: "no_messages", reviewedMessages: 0, accepted: 0, staged: 0, rejected: 0 };
+			return { status: "no_messages", reviewedMessages: 0, updatedMemory: false, updatedUser: false };
 		}
 		await emit(onProgress, `Reviewing ${messages.length} processed message${messages.length === 1 ? "" : "s"}.`);
 		const summary = await reviewMemoryBatch({ config, messages });
@@ -92,7 +92,7 @@ export async function runMemoryReviewOnce(
 			error: message,
 		});
 		await emit(onProgress, `Memory review failed: ${message}`);
-		return { status: "failed", reviewedMessages: 0, accepted: 0, staged: 0, rejected: 0, error: message };
+		return { status: "failed", reviewedMessages: 0, updatedMemory: false, updatedUser: false, error: message };
 	} finally {
 		running = false;
 	}

@@ -14,10 +14,6 @@ const {
 	mockExistsSync,
 	mockEnsureSession,
 	mockResetSession,
-	mockListPendingMemoryProposals,
-	mockGetMemoryStatus,
-	mockApplyPendingMemoryProposal,
-	mockRejectMemoryProposal,
 	MockGrammyError,
 } = vi.hoisted(() => {
 	class MockGrammyError extends Error {
@@ -45,10 +41,6 @@ const {
 		mockExistsSync: vi.fn(),
 		mockEnsureSession: vi.fn(),
 		mockResetSession: vi.fn(),
-		mockListPendingMemoryProposals: vi.fn(),
-		mockGetMemoryStatus: vi.fn(),
-		mockApplyPendingMemoryProposal: vi.fn(),
-		mockRejectMemoryProposal: vi.fn(),
 		MockGrammyError,
 	};
 });
@@ -97,12 +89,6 @@ vi.mock("../session-repository.js", () => ({
 vi.mock("../workspace.js", () => ({ getWorkspace: vi.fn(), formatPath: vi.fn((p: string) => p) }));
 vi.mock("../cron/pm2.js", () => ({
 	restartCronPm2: (...args: unknown[]) => mockRestartCronPm2(...args),
-}));
-vi.mock("../memory/proposals.js", () => ({
-	listPendingMemoryProposals: () => mockListPendingMemoryProposals(),
-	getMemoryStatus: () => mockGetMemoryStatus(),
-	applyPendingMemoryProposal: (...args: unknown[]) => mockApplyPendingMemoryProposal(...args),
-	rejectMemoryProposal: (...args: unknown[]) => mockRejectMemoryProposal(...args),
 }));
 vi.mock("../db.js", () => ({
 	getSqlite: () => mockGetSqlite(),
@@ -189,10 +175,6 @@ describe("TelegramChannel", () => {
 			stdout: "",
 			stderr: "",
 		});
-		mockListPendingMemoryProposals.mockReturnValue([]);
-		mockGetMemoryStatus.mockReturnValue({ pending: 0, applied: 0, rejected: 0 });
-		mockApplyPendingMemoryProposal.mockResolvedValue(undefined);
-		mockRejectMemoryProposal.mockReturnValue(false);
 		mockCronDb([]);
 		mockExistsSync.mockReturnValue(true);
 		channel = new TelegramChannel(makeConfig());
@@ -403,7 +385,7 @@ describe("TelegramChannel", () => {
 				{ command: "new", description: "Start a new session" },
 				{ command: "status", description: "Show current session info" },
 				{ command: "cron", description: "Manage cron jobs" },
-				{ command: "memory", description: "Review memory proposals" },
+				{ command: "memory", description: "Review and update memory" },
 			]);
 			expect(commandHandler("new")).toBeTypeOf("function");
 			expect(commandHandler("session")).toBeUndefined();

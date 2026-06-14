@@ -11,10 +11,6 @@ const {
 	mockResetSession,
 	mockGetWorkspace,
 	mockFormatPath,
-	mockListPendingMemoryProposals,
-	mockGetMemoryStatus,
-	mockApplyPendingMemoryProposal,
-	mockRejectMemoryProposal,
 } = vi.hoisted(() => ({
 	mockExistsSync: vi.fn(),
 	mockRestartCronPm2: vi.fn(),
@@ -23,10 +19,6 @@ const {
 	mockResetSession: vi.fn(),
 	mockGetWorkspace: vi.fn(),
 	mockFormatPath: vi.fn(),
-	mockListPendingMemoryProposals: vi.fn(),
-	mockGetMemoryStatus: vi.fn(),
-	mockApplyPendingMemoryProposal: vi.fn(),
-	mockRejectMemoryProposal: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({
@@ -57,13 +49,6 @@ vi.mock("../session-repository.js", () => ({
 vi.mock("../workspace.js", () => ({
 	getWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
 	formatPath: (...args: unknown[]) => mockFormatPath(...args),
-}));
-
-vi.mock("../memory/proposals.js", () => ({
-	listPendingMemoryProposals: () => mockListPendingMemoryProposals(),
-	getMemoryStatus: () => mockGetMemoryStatus(),
-	applyPendingMemoryProposal: (...args: unknown[]) => mockApplyPendingMemoryProposal(...args),
-	rejectMemoryProposal: (...args: unknown[]) => mockRejectMemoryProposal(...args),
 }));
 
 interface CronTestRow {
@@ -144,10 +129,6 @@ describe("CommandProcessor", () => {
 			stdout: "",
 			stderr: "",
 		});
-		mockListPendingMemoryProposals.mockReturnValue([]);
-		mockGetMemoryStatus.mockReturnValue({ pending: 0, applied: 0, rejected: 0 });
-		mockApplyPendingMemoryProposal.mockResolvedValue(undefined);
-		mockRejectMemoryProposal.mockReturnValue(false);
 		mockExistsSync.mockReturnValue(true);
 		mockCronDb([]);
 	});
@@ -192,9 +173,9 @@ describe("CommandProcessor", () => {
 			return {
 				status: "completed" as const,
 				reviewedMessages: 2,
-				accepted: 1,
-				staged: 1,
-				rejected: 0,
+				updatedMemory: true,
+				updatedUser: true,
+				report: "Updated workspace and user memory.",
 			};
 		});
 
@@ -226,6 +207,8 @@ describe("CommandProcessor", () => {
 			description: "Reviewing 2 processed messages",
 			type: "review",
 		}));
-		expect(result.content).toContain("Applied 1, staged 1, rejected 0.");
+		expect(result.content).toBe("Updated workspace and user memory.");
+		expect(result.content).not.toContain("Memory review run:");
+		expect(result.content).not.toContain("Preparing workspace memory files.");
 	});
 });

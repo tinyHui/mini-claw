@@ -170,7 +170,7 @@ export class TelegramChannel {
 			{ command: "new", description: "Start a new session" },
 			{ command: "status", description: "Show current session info" },
 			{ command: "cron", description: "Manage cron jobs" },
-			{ command: "memory", description: "Review memory proposals" },
+			{ command: "memory", description: "Review and update memory" },
 		];
 		this.bot.api.setMyCommands(commands).catch(() => {});
 
