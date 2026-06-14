@@ -15,6 +15,9 @@ export interface Config {
 	piTimeoutMs: number;
 	shellTimeoutMs: number;
 	sessionTitleTimeoutMs: number;
+	memoryReviewEnabled: boolean;
+	memoryReviewIntervalMs: number;
+	memoryReviewBatchLimit: number;
 }
 
 let cachedConfig: Config | undefined;
@@ -71,6 +74,16 @@ export function loadConfig(): Config {
 		process.env.SESSION_TITLE_TIMEOUT_MS || "10000",
 		10,
 	);
+	const memoryReviewEnabled =
+		(process.env.MINI_CLAW_MEMORY_REVIEW_ENABLED?.trim() || "true").toLowerCase() !== "false";
+	const memoryReviewIntervalMs = parseInt(
+		process.env.MINI_CLAW_MEMORY_REVIEW_INTERVAL_MS || String(60 * 60 * 1000),
+		10,
+	);
+	const memoryReviewBatchLimit = parseInt(
+		process.env.MINI_CLAW_MEMORY_REVIEW_BATCH_LIMIT || "40",
+		10,
+	);
 
 	const logLevel = process.env.LOG_LEVEL?.trim() || "info";
 
@@ -87,6 +100,9 @@ export function loadConfig(): Config {
 		piTimeoutMs,
 		shellTimeoutMs,
 		sessionTitleTimeoutMs,
+		memoryReviewEnabled,
+		memoryReviewIntervalMs,
+		memoryReviewBatchLimit,
 	};
 	return cachedConfig;
 }

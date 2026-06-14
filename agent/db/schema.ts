@@ -18,11 +18,26 @@ export const messages = sqliteTable(
 		role: text("role").notNull(),
 		content: text("content").notNull(),
 		status: text("status").notNull().default("pending"),
+		reviewedAt: text("reviewedAt"),
 	},
 	(table) => ({
 		pk: primaryKey({ columns: [table.id, table.sessionId] }),
 	}),
 );
+
+export const memoryProposals = sqliteTable("memory_proposals", {
+	id: text("id").primaryKey().notNull(),
+	createdAt: text("createdAt").notNull(),
+	target: text("target").notNull(),
+	entry: text("entry").notNull(),
+	rationale: text("rationale").notNull(),
+	evidenceMessageIdsJson: text("evidenceMessageIdsJson").notNull(),
+	status: text("status").notNull(),
+	source: text("source").notNull(),
+	appliedAt: text("appliedAt"),
+	beforeHash: text("beforeHash"),
+	afterHash: text("afterHash"),
+});
 
 export const cronJobs = sqliteTable("cron_jobs", {
 	name: text("name").primaryKey().notNull(),
@@ -68,3 +83,5 @@ export type CronCapabilityRow = typeof cronCapabilities.$inferSelect;
 export type NewCronCapabilityRow = typeof cronCapabilities.$inferInsert;
 export type MailboxRow = typeof mailbox.$inferSelect;
 export type NewMailboxRow = typeof mailbox.$inferInsert;
+export type MemoryProposalRow = typeof memoryProposals.$inferSelect;
+export type NewMemoryProposalRow = typeof memoryProposals.$inferInsert;

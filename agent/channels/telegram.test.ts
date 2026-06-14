@@ -14,6 +14,10 @@ const {
 	mockExistsSync,
 	mockEnsureSession,
 	mockResetSession,
+	mockListPendingMemoryProposals,
+	mockGetMemoryStatus,
+	mockApplyPendingMemoryProposal,
+	mockRejectMemoryProposal,
 	MockGrammyError,
 } = vi.hoisted(() => {
 	class MockGrammyError extends Error {
@@ -41,6 +45,10 @@ const {
 		mockExistsSync: vi.fn(),
 		mockEnsureSession: vi.fn(),
 		mockResetSession: vi.fn(),
+		mockListPendingMemoryProposals: vi.fn(),
+		mockGetMemoryStatus: vi.fn(),
+		mockApplyPendingMemoryProposal: vi.fn(),
+		mockRejectMemoryProposal: vi.fn(),
 		MockGrammyError,
 	};
 });
@@ -90,6 +98,12 @@ vi.mock("../workspace.js", () => ({ getWorkspace: vi.fn(), formatPath: vi.fn((p:
 vi.mock("../cron/pm2.js", () => ({
 	restartCronPm2: (...args: unknown[]) => mockRestartCronPm2(...args),
 }));
+vi.mock("../memory/proposals.js", () => ({
+	listPendingMemoryProposals: () => mockListPendingMemoryProposals(),
+	getMemoryStatus: () => mockGetMemoryStatus(),
+	applyPendingMemoryProposal: (...args: unknown[]) => mockApplyPendingMemoryProposal(...args),
+	rejectMemoryProposal: (...args: unknown[]) => mockRejectMemoryProposal(...args),
+}));
 vi.mock("../db.js", () => ({
 	getSqlite: () => mockGetSqlite(),
 }));
@@ -110,6 +124,9 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
 		piTimeoutMs: 300000,
 		shellTimeoutMs: 60000,
 		sessionTitleTimeoutMs: 10000,
+		memoryReviewEnabled: true,
+		memoryReviewIntervalMs: 3600000,
+		memoryReviewBatchLimit: 40,
 		...overrides,
 	};
 }
@@ -171,6 +188,10 @@ describe("TelegramChannel", () => {
 			stdout: "",
 			stderr: "",
 		});
+		mockListPendingMemoryProposals.mockReturnValue([]);
+		mockGetMemoryStatus.mockReturnValue({ pending: 0, applied: 0, rejected: 0 });
+		mockApplyPendingMemoryProposal.mockResolvedValue(undefined);
+		mockRejectMemoryProposal.mockReturnValue(false);
 		mockCronDb([]);
 		mockExistsSync.mockReturnValue(true);
 		channel = new TelegramChannel(makeConfig());
@@ -349,21 +370,31 @@ describe("TelegramChannel", () => {
 
 	describe("commands", () => {
 		function commandHandler(name: string) {
-			return mockCommand.mock.calls.find((call: unknown[]) => call[0] === name)?.[1] as
+			for (let index = mockCommand.mock.calls.length - 1; index >= 0; index -= 1) {
+				const call = mockCommand.mock.calls[index] as unknown[];
+				if (call[0] === name) {
+					return call[1] as
+						| ((ctx: { chat: { id: number }; message?: { text: string }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
+						| undefined;
+				}
+			}
+			return undefined as
 				| ((ctx: { chat: { id: number }; message?: { text: string }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
 				| undefined;
 		}
 
-		it("registers /new, /status, and /cron commands", () => {
+		it("registers /new, /status, /cron, and /memory commands", () => {
 			expect(mockSetMyCommands).toHaveBeenCalledWith([
 				{ command: "new", description: "Start a new session" },
 				{ command: "status", description: "Show current session info" },
 				{ command: "cron", description: "Manage cron jobs" },
+				{ command: "memory", description: "Review memory proposals" },
 			]);
 			expect(commandHandler("new")).toBeTypeOf("function");
 			expect(commandHandler("session")).toBeUndefined();
 			expect(commandHandler("cron")).toBeTypeOf("function");
-			expect(mockCommand).toHaveBeenCalledTimes(3);
+			expect(commandHandler("memory")).toBeTypeOf("function");
+			expect(mockCommand).toHaveBeenCalledTimes(4);
 		});
 
 		it("starts a new session with /new", async () => {
@@ -492,6 +523,88 @@ describe("TelegramChannel", () => {
 			expect(db.updateRun).toHaveBeenCalledWith(0, "digest");
 			expect(reply).toHaveBeenCalledWith(
 				"Cron job digest disabled, but failed to restart mini-claw-cron: not found",
+			);
+		});
+
+		it("lists pending memory proposals", async () => {
+			mockListPendingMemoryProposals.mockReturnValueOnce([{
+				id: "abcdef123456",
+				target: "USER",
+				entry: "Prefers concise updates.",
+				rationale: "The user asked for short responses.",
+				createdAt: "2026-06-13T00:00:00.000Z",
+				evidenceMessageIdsJson: "[]",
+				status: "pending",
+				source: "background_review",
+				appliedAt: null,
+				beforeHash: null,
+				afterHash: null,
+			}]);
+			const reply = vi.fn().mockResolvedValue(undefined);
+
+			await commandHandler("memory")?.({ chat: { id: 123 }, message: { text: "/memory pending" }, reply });
+
+			expect(reply).toHaveBeenCalledWith(expect.stringContaining("Prefers concise updates."));
+		});
+
+		it("approves a pending memory proposal", async () => {
+			mockApplyPendingMemoryProposal.mockResolvedValueOnce({ id: "abc123" });
+			const reply = vi.fn().mockResolvedValue(undefined);
+
+			await commandHandler("memory")?.({ chat: { id: 123 }, message: { text: "/memory approve abc123" }, reply });
+
+			expect(mockApplyPendingMemoryProposal).toHaveBeenCalledWith("/tmp/ws", "abc123");
+			expect(reply).toHaveBeenCalledWith("Approved memory proposal abc123.");
+		});
+
+		it("rejects a pending memory proposal", async () => {
+			mockRejectMemoryProposal.mockReturnValueOnce(true);
+			const reply = vi.fn().mockResolvedValue(undefined);
+
+			await commandHandler("memory")?.({ chat: { id: 123 }, message: { text: "/memory reject abc123" }, reply });
+
+			expect(mockRejectMemoryProposal).toHaveBeenCalledWith("abc123");
+			expect(reply).toHaveBeenCalledWith("Rejected memory proposal abc123.");
+		});
+
+		it("updates a process log while /memory run is running", async () => {
+			mockEditMessageText.mockResolvedValue(true);
+			const runOnce = vi.fn(async (onProgress?: (message: string) => Promise<void> | void) => {
+				await onProgress?.("Preparing workspace memory files.");
+				await onProgress?.("Reviewing 2 processed messages.");
+				return {
+					status: "completed" as const,
+					reviewedMessages: 2,
+					accepted: 1,
+					staged: 1,
+					rejected: 0,
+				};
+			});
+			channel = new TelegramChannel(makeConfig(), {
+				runOnce,
+				stop: vi.fn(),
+				getLastReviewAt: vi.fn(),
+			});
+			const reply = vi.fn().mockResolvedValue({ message_id: 77 });
+
+			await commandHandler("memory")?.({ chat: { id: 123 }, message: { text: "/memory run" }, reply });
+
+			expect(reply).toHaveBeenCalledWith([
+				"Memory review run:",
+				"- Starting manual memory review.",
+			].join("\n"));
+			expect(runOnce).toHaveBeenCalledOnce();
+			expect(mockEditMessageText).toHaveBeenCalledWith(
+				123,
+				77,
+				expect.stringContaining("Reviewing 2 processed messages."),
+				{ parse_mode: "MarkdownV2" },
+			);
+			expect(mockEditMessageText).toHaveBeenLastCalledWith(
+				123,
+				77,
+				expect.stringContaining("Applied 1, staged 1, rejected 0."),
+				{ parse_mode: "MarkdownV2" },
 			);
 		});
 	});

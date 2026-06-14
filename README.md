@@ -52,8 +52,10 @@ pi /login
 cp .env.example .env
 # Edit .env with your TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID
 
-# Prepare workspace prompt and database
+# Prepare workspace prompt, memory files, and database
 $EDITOR ~/mini-claw-workspace/SOUL.md
+$EDITOR ~/mini-claw-workspace/MEMORY.md
+$EDITOR ~/mini-claw-workspace/USER.md
 pnpm db:migrate
 
 # Start the bot
@@ -84,6 +86,7 @@ make test       # Run tests
 | `/status`      | Show bot status                    |
 | `/cron`        | List, enable, or disable cron jobs |
 | `/cron restart` | Reload the pm2 cron scheduler     |
+| `/memory`      | Review memory proposals            |
 
 ## Configuration
 
@@ -98,6 +101,9 @@ MINI_CLAW_SESSION_DIR=~/.mini-claw/sessions
 MINI_CLAW_APP_ROOT=/path/to/mini-claw      # Default: current process cwd
 MINI_CLAW_CRON_DIR=/path/to/mini-claw/cron # Default: $MINI_CLAW_APP_ROOT/cron
 PI_THINKING_LEVEL=low                      # low | medium | high
+MINI_CLAW_MEMORY_REVIEW_ENABLED=true       # Periodic self-learning memory review
+MINI_CLAW_MEMORY_REVIEW_INTERVAL_MS=3600000
+MINI_CLAW_MEMORY_REVIEW_BATCH_LIMIT=40
 
 # Rate limiting & timeouts (milliseconds)
 RATE_LIMIT_COOLDOWN_MS=5000                # Default: 5 seconds
@@ -168,6 +174,8 @@ These parts stay manual:
 $EDITOR ~/mini-claw/.env
 pi /login
 $EDITOR ~/mini-claw-workspace/SOUL.md
+$EDITOR ~/mini-claw-workspace/MEMORY.md
+$EDITOR ~/mini-claw-workspace/USER.md
 ```
 
 At minimum, set `TELEGRAM_BOT_TOKEN` in `~/mini-claw/.env`. The Pi login is not
@@ -268,8 +276,8 @@ pnpm test:coverage
 - [X] pi-mono core agent SDK to replace the interactive cli
 - [X] Sandbox restriction for all bash execution
 - [X] OpenClaw alike SOUL.md updated
-- [ ] OpenClaw alike USER.md, but support multiple of them and link the relative one with each session
-- [ ] Support cross session memory
+- [x] OpenClaw alike USER.md workspace memory bootstrap and prompt loading
+- [x] Support cross session memory through MEMORY.md/USER.md and periodic proposal review
 - [x] Integrate with codex
 - [x] Support scheduled jobs
 - [ ] Install skills to make research work

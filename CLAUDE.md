@@ -96,7 +96,12 @@ make login
 cp .env.example .env
 # Edit .env with your TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID
 
-# 4. Start the bot
+# 4. Prepare workspace prompt and memory files
+$EDITOR ~/mini-claw-workspace/SOUL.md
+$EDITOR ~/mini-claw-workspace/MEMORY.md
+$EDITOR ~/mini-claw-workspace/USER.md
+
+# 5. Start the bot
 make start
 ```
 
@@ -124,6 +129,9 @@ MINI_CLAW_SESSION_DIR=~/.mini-claw/sessions
 MINI_CLAW_APP_ROOT=/path/to/mini-claw    # Default: current process cwd
 MINI_CLAW_CRON_DIR=/path/to/mini-claw/cron
 PI_THINKING_LEVEL=low                   # low | medium | high
+MINI_CLAW_MEMORY_REVIEW_ENABLED=true
+MINI_CLAW_MEMORY_REVIEW_INTERVAL_MS=3600000
+MINI_CLAW_MEMORY_REVIEW_BATCH_LIMIT=40
 
 # Rate Limiting & Timeouts (all in milliseconds)
 RATE_LIMIT_COOLDOWN_MS=5000             # Default: 5 seconds between messages
@@ -147,6 +155,7 @@ SESSION_TITLE_TIMEOUT_MS=10000          # Default: 10 seconds
 | `/status`  | Show chat ID, workspace, and session state                         |
 | `/cron`    | List, enable, or disable cron jobs                                 |
 | `/cron restart` | Reload the pm2 cron scheduler                                |
+| `/memory`  | Review memory proposals                                            |
 
 ## Authentication Flow
 

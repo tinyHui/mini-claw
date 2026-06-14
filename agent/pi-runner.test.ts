@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "./config.js";
 
 const mockMkdir = vi.fn();
-const mockReadSoulPromptFile = vi.fn();
+const mockReadWorkspacePrompt = vi.fn();
 
 const listeners: Array<(event: unknown) => void> = [];
 const mockPrompt = vi.fn();
@@ -18,7 +18,7 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 vi.mock("./pi-utils.js", () => ({
-	readSoulPromptFile: (...args: unknown[]) => mockReadSoulPromptFile(...args),
+	readWorkspacePrompt: (...args: unknown[]) => mockReadWorkspacePrompt(...args),
 }));
 
 vi.mock("./extensions/sandbox/index.js", () => ({
@@ -82,6 +82,9 @@ describe("pi-runner", () => {
 		piTimeoutMs: 300000,
 		shellTimeoutMs: 60000,
 		sessionTitleTimeoutMs: 10000,
+		memoryReviewEnabled: true,
+		memoryReviewIntervalMs: 3600000,
+		memoryReviewBatchLimit: 40,
 	};
 
 	beforeEach(() => {
@@ -90,7 +93,7 @@ describe("pi-runner", () => {
 		vi.useFakeTimers();
 		listeners.length = 0;
 		mockMkdir.mockResolvedValue(undefined);
-		mockReadSoulPromptFile.mockResolvedValue("");
+		mockReadWorkspacePrompt.mockResolvedValue("");
 		mockResolveSessionHistoryPath.mockResolvedValue(
 			"/sessions/20260322T120000_bf84f08c.jsonl",
 		);
@@ -265,5 +268,57 @@ describe("pi-runner", () => {
 			() => {},
 		);
 		expect(result.output).toBe("fallback text");
+	});
+
+	it("uses completed assistant message text when no text deltas or session fallback are available", async () => {
+		const { runPiWithStreaming } = await import("./pi-runner.js");
+		mockGetLastAssistantText.mockReturnValue(undefined);
+		mockPrompt.mockImplementation(async () => {
+			const listener = listeners[0];
+			listener({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "final assistant text" }],
+				},
+			});
+			listener({ type: "agent_end", messages: [] });
+		});
+
+		const result = await runPiWithStreaming(
+			config,
+			"sess-1",
+			"hi",
+			"/workspace",
+			() => {},
+		);
+		expect(result.output).toBe("final assistant text");
+	});
+
+	it("uses agent_end assistant messages when message_end text is unavailable", async () => {
+		const { runPiWithStreaming } = await import("./pi-runner.js");
+		mockGetLastAssistantText.mockReturnValue(undefined);
+		mockPrompt.mockImplementation(async () => {
+			const listener = listeners[0];
+			listener({
+				type: "agent_end",
+				messages: [
+					{ role: "user", content: "hi" },
+					{
+						role: "assistant",
+						content: [{ type: "text", text: "agent end text" }],
+					},
+				],
+			});
+		});
+
+		const result = await runPiWithStreaming(
+			config,
+			"sess-1",
+			"hi",
+			"/workspace",
+			() => {},
+		);
+		expect(result.output).toBe("agent end text");
 	});
 });

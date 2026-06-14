@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { getDb } from "./db.js";
 import { messages, type MessageRow } from "./db/schema.js";
 
@@ -19,7 +19,7 @@ export type Message = MessageRow & {
 	status: MessageStatus;
 };
 
-export type InsertMessageData = Omit<Message, "id" | "timeStamp" | "status"> & {
+export type InsertMessageData = Omit<Message, "id" | "timeStamp" | "status" | "reviewedAt"> & {
 	id?: string;
 	timeStamp?: string;
 	status?: MessageStatus;
@@ -34,6 +34,7 @@ export function insertMessage(data: InsertMessageData): Message {
 		role: data.role,
 		content: data.content,
 		status: data.status ?? "pending",
+		reviewedAt: null,
 	};
 
 	db.insert(messages).values(message).run();
@@ -108,4 +109,27 @@ export function markMessageProcessed(
 		.set({ status: "processed" })
 		.where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
 		.run();
+}
+
+export function getProcessedMessagesForReview(limit: number): Message[] {
+	const db = getDb();
+	return db
+		.select()
+		.from(messages)
+		.where(and(eq(messages.status, "processed"), ne(messages.status, "ACK"), isNull(messages.reviewedAt)))
+		.orderBy(asc(messages.timeStamp))
+		.limit(limit)
+		.all() as Message[];
+}
+
+export function markMessagesReviewed(reviewedMessages: Pick<Message, "id" | "sessionId">[]): void {
+	if (reviewedMessages.length === 0) return;
+	const db = getDb();
+	const reviewedAt = new Date().toISOString();
+	for (const message of reviewedMessages) {
+		db.update(messages)
+			.set({ reviewedAt })
+			.where(and(eq(messages.id, message.id), eq(messages.sessionId, message.sessionId)))
+			.run();
+	}
 }

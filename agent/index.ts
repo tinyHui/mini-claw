@@ -9,8 +9,9 @@ import {
 	markMessageProcessed,
 	updateOrInsertAssistantMessage,
 } from "./message-repository.js";
+import { createMemoryReviewWorker } from "./memory/worker.js";
 import { type ActivityUpdate, checkPiAuth, runPiWithStreaming } from "./pi-runner.js";
-import { ensureSoulPromptFile } from "./pi-utils.js";
+import { ensureSoulPromptFile, ensureWorkspaceMemoryFiles } from "./pi-utils.js";
 import { ensureSession } from "./session-repository.js";
 import { getWorkspace } from "./workspace.js";
 
@@ -43,7 +44,8 @@ async function main() {
 		await mkdir(config.workspace, { recursive: true });
 		await mkdir(config.sessionDir, { recursive: true });
 		await ensureSoulPromptFile(config.workspace);
-		logger.info("SOUL.md file found, booting Pi...");
+		await ensureWorkspaceMemoryFiles(config.workspace);
+		logger.info("Workspace prompt and memory files ready, booting Pi...");
 
 		initializeDatabase();
 
@@ -62,7 +64,8 @@ async function main() {
 			logger.info("Sandbox: disabled (unsupported platform or init failed)");
 		}
 
-		const channel = createTelegramChannel(config);
+		const memoryWorker = createMemoryReviewWorker(config);
+		const channel = createTelegramChannel(config, memoryWorker);
 
 		channel.onMessageSent(async (sessionId, telegramMessageId, content, status) => {
 			await withLogContext(
@@ -182,6 +185,7 @@ async function main() {
 			void withLogContext({ operation: "shutdown" }, async () => {
 				logger.info("Shutting down...");
 				channel.stop();
+				memoryWorker.stop();
 				await resetSandbox();
 				process.exit(0);
 			});

@@ -196,6 +196,9 @@ describe("config", () => {
 				piTimeoutMs: 300000,
 				shellTimeoutMs: 60000,
 				sessionTitleTimeoutMs: 10000,
+				memoryReviewEnabled: true,
+				memoryReviewIntervalMs: 3600000,
+				memoryReviewBatchLimit: 40,
 			});
 		});
 
@@ -330,6 +333,32 @@ describe("config", () => {
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
 			expect(config.sessionTitleTimeoutMs).toBe(20000);
+		});
+
+		it("should use default memory review settings", async () => {
+			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
+			delete process.env.MINI_CLAW_MEMORY_REVIEW_ENABLED;
+			delete process.env.MINI_CLAW_MEMORY_REVIEW_INTERVAL_MS;
+			delete process.env.MINI_CLAW_MEMORY_REVIEW_BATCH_LIMIT;
+			const { loadConfig } = await import("./config.js");
+			const config = loadConfig();
+			expect(config.memoryReviewEnabled).toBe(true);
+			expect(config.memoryReviewIntervalMs).toBe(3600000);
+			expect(config.memoryReviewBatchLimit).toBe(40);
+		});
+
+		it("should use custom memory review settings", async () => {
+			process.env.TELEGRAM_BOT_TOKEN = "test-token";
+			process.env.TELEGRAM_USER_ID = "123";
+			process.env.MINI_CLAW_MEMORY_REVIEW_ENABLED = "false";
+			process.env.MINI_CLAW_MEMORY_REVIEW_INTERVAL_MS = "5000";
+			process.env.MINI_CLAW_MEMORY_REVIEW_BATCH_LIMIT = "5";
+			const { loadConfig } = await import("./config.js");
+			const config = loadConfig();
+			expect(config.memoryReviewEnabled).toBe(false);
+			expect(config.memoryReviewIntervalMs).toBe(5000);
+			expect(config.memoryReviewBatchLimit).toBe(5);
 		});
 	});
 });

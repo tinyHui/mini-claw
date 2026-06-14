@@ -17,7 +17,7 @@ import {
 } from "./extensions/sandbox/index.js";
 import { createCronGeneratorExtensionFactory } from "./extensions/cron/cron-generator-extension.js";
 import { logger } from "./logger.js";
-import { readSoulPromptFile } from "./pi-utils.js";
+import { readWorkspacePrompt } from "./pi-utils.js";
 import { resolveSessionHistoryPath } from "./session-history-path.js";
 import { mergeRepoSkills } from "./skills.js";
 
@@ -52,6 +52,7 @@ interface PendingRequest {
 	resolve: (result: RunResult) => void;
 	reject: (error: unknown) => void;
 	textDeltas: string[];
+	lastAssistantText?: string;
 	trace: string[];
 	timeout: NodeJS.Timeout;
 	heartbeat: NodeJS.Timeout;
@@ -197,7 +198,7 @@ class PiSdkRunner {
 			sessionId,
 		);
 
-		const soulPrompt = await readSoulPromptFile(workspace);
+		const workspacePrompt = await readWorkspacePrompt(workspace);
 		const extensionFactories = [
 			createCronGeneratorExtensionFactory({ config: this.config }),
 			...(isSandboxReady()
@@ -210,7 +211,7 @@ class PiSdkRunner {
 			agentDir: getAgentDir(),
 			noExtensions: !isSandboxReady(),
 			extensionFactories,
-			systemPromptOverride: () => soulPrompt,
+			systemPromptOverride: () => workspacePrompt,
 			skillsOverride: (base) => mergeRepoSkills(base, this.config.appRoot),
 		});
 		await resourceLoader.reload();
@@ -263,6 +264,14 @@ class PiSdkRunner {
 			request.textDeltas.push(event.assistantMessageEvent.delta);
 		}
 
+		if (event.type === "message_end") {
+			request.lastAssistantText = this.extractAssistantText(event.message) ?? request.lastAssistantText;
+		}
+
+		if (event.type === "agent_end") {
+			request.lastAssistantText = this.extractLastAssistantText(event.messages) ?? request.lastAssistantText;
+		}
+
 		if (event.type === "agent_end") {
 			if (runtime.queue.length > 0) {
 				this.resolveHead(runtime);
@@ -277,12 +286,37 @@ class PiSdkRunner {
 		clearTimeout(request.timeout);
 		clearInterval(request.heartbeat);
 		const output = request.textDeltas.join("").trim()
+			|| request.lastAssistantText
 			|| runtime.session?.getLastAssistantText()
 			|| "(no output)";
 		request.resolve({
 			output,
 			trace: request.trace.join("\n"),
 		});
+	}
+
+	private extractLastAssistantText(messages: AgentSessionEvent extends { messages: infer T } ? T : unknown): string | undefined {
+		if (!Array.isArray(messages)) return undefined;
+		for (let index = messages.length - 1; index >= 0; index -= 1) {
+			const text = this.extractAssistantText(messages[index]);
+			if (text) return text;
+		}
+		return undefined;
+	}
+
+	private extractAssistantText(message: unknown): string | undefined {
+		if (!message || typeof message !== "object") return undefined;
+		const candidate = message as { role?: unknown; content?: unknown };
+		if (candidate.role !== "assistant" || !Array.isArray(candidate.content)) return undefined;
+		const text = candidate.content
+			.map((content) => {
+				if (!content || typeof content !== "object") return "";
+				const part = content as { type?: unknown; text?: unknown };
+				return part.type === "text" && typeof part.text === "string" ? part.text : "";
+			})
+			.join("")
+			.trim();
+		return text || undefined;
 	}
 
 	private failAll(runtime: PiRuntime, error: unknown): void {

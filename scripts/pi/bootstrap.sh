@@ -158,6 +158,26 @@ Replace this file with the operating instructions you want Pi to use.
 SOUL
 		log "Created placeholder $WORKSPACE_DIR/SOUL.md; edit it before starting the service"
 	fi
+
+	if [ ! -f "$WORKSPACE_DIR/MEMORY.md" ]; then
+		cat >"$WORKSPACE_DIR/MEMORY.md" <<'MEMORY'
+# Workspace Memory
+
+Durable project facts, decisions, and operating notes learned from Mini-Claw conversations.
+Keep entries short and declarative. Do not store transient task state or secrets.
+MEMORY
+		log "Created placeholder $WORKSPACE_DIR/MEMORY.md"
+	fi
+
+	if [ ! -f "$WORKSPACE_DIR/USER.md" ]; then
+		cat >"$WORKSPACE_DIR/USER.md" <<'USER'
+# User Memory
+
+Durable user facts and preferences learned from Mini-Claw conversations.
+Keep entries short and declarative. Do not store secrets.
+USER
+		log "Created placeholder $WORKSPACE_DIR/USER.md"
+	fi
 }
 
 prepare_env_file() {

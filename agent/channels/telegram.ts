@@ -5,6 +5,13 @@ import type { Config } from "../config.js";
 import { restartCronPm2 } from "../cron/pm2.js";
 import { getSqlite } from "../db.js";
 import { logger, withLogContext } from "../logger.js";
+import {
+	applyPendingMemoryProposal,
+	getMemoryStatus,
+	listPendingMemoryProposals,
+	rejectMemoryProposal,
+} from "../memory/proposals.js";
+import type { MemoryReviewRunResult, MemoryReviewWorker } from "../memory/worker.js";
 import { checkRateLimit } from "../rate-limiter.js";
 import { ensureSession, resetSession } from "../session-repository.js";
 import { formatPath, getWorkspace } from "../workspace.js";
@@ -45,11 +52,13 @@ function parseCronCommandArgs(text?: string): string[] {
 export class TelegramChannel {
 	private bot: Bot<Context>;
 	private config: Config;
+	private memoryWorker?: MemoryReviewWorker;
 	private messageCallback: TelegramMessageCallback | null = null;
 	private messageSentCallback: TelegramMessageSentCallback | null = null;
 
-	constructor(config: Config) {
+	constructor(config: Config, memoryWorker?: MemoryReviewWorker) {
 		this.config = config;
+		this.memoryWorker = memoryWorker;
 		this.bot = new Bot<Context>(config.telegramToken);
 		this.setupHandlers();
 	}
@@ -186,6 +195,7 @@ export class TelegramChannel {
 			{ command: "new", description: "Start a new session" },
 			{ command: "status", description: "Show current session info" },
 			{ command: "cron", description: "Manage cron jobs" },
+			{ command: "memory", description: "Review memory proposals" },
 		];
 		this.bot.api.setMyCommands(commands).catch(() => {});
 
@@ -206,6 +216,14 @@ export class TelegramChannel {
 
 		this.bot.command("cron", async (ctx) => {
 			await this.handleCronCommand(
+				String(ctx.chat.id),
+				ctx.message?.text,
+				ctx.reply.bind(ctx),
+			);
+		});
+
+		this.bot.command("memory", async (ctx) => {
+			await this.handleMemoryCommand(
 				String(ctx.chat.id),
 				ctx.message?.text,
 				ctx.reply.bind(ctx),
@@ -317,6 +335,152 @@ export class TelegramChannel {
 		await reply(this.formatCronHelp());
 	}
 
+	private async handleMemoryCommand(
+		chatId: string,
+		text: string | undefined,
+		reply: (text: string) => Promise<unknown>,
+	): Promise<void> {
+		const [, action, id] = text?.match(/^\/memory(?:@\S+)?(?:\s+(\S+))?(?:\s+(\S+))?/) ?? [];
+		if (!action) {
+			await reply(this.formatMemoryHelp());
+			return;
+		}
+
+		if (action === "pending") {
+			await reply(this.formatPendingMemoryProposals());
+			return;
+		}
+
+		if (action === "status") {
+			await reply(this.formatMemoryStatus());
+			return;
+		}
+
+		if (action === "run") {
+			await this.runMemoryReviewFromCommand(chatId, reply);
+			return;
+		}
+
+		if (action === "approve" && id) {
+			const result = await applyPendingMemoryProposal(this.config.workspace, id);
+			await reply(result ? `Approved memory proposal ${id}.` : `Pending memory proposal not found: ${id}`);
+			return;
+		}
+
+		if (action === "reject" && id) {
+			const rejected = rejectMemoryProposal(id);
+			await reply(rejected ? `Rejected memory proposal ${id}.` : `Pending memory proposal not found: ${id}`);
+			return;
+		}
+
+		await reply(this.formatMemoryHelp());
+	}
+
+	private async runMemoryReviewFromCommand(
+		chatId: string,
+		reply: (text: string) => Promise<unknown>,
+	): Promise<void> {
+		const log = ["Starting manual memory review."];
+		let messageId = await this.updateMemoryRunLog(chatId, undefined, log, reply);
+
+		if (!this.memoryWorker) {
+			log.push("Memory review worker is unavailable.");
+			await this.updateMemoryRunLog(chatId, messageId, log, reply);
+			return;
+		}
+
+		const result = await this.memoryWorker.runOnce(async (message) => {
+			log.push(message);
+			messageId = await this.updateMemoryRunLog(chatId, messageId, log, reply);
+		});
+
+		log.push(this.formatMemoryRunResult(result));
+		await this.updateMemoryRunLog(chatId, messageId, log, reply);
+	}
+
+	private async updateMemoryRunLog(
+		chatId: string,
+		messageId: string | undefined,
+		log: string[],
+		reply: (text: string) => Promise<unknown>,
+	): Promise<string | undefined> {
+		const content = this.formatMemoryRunLog(log);
+		if (!messageId) {
+			const sent = await reply(content) as { message_id?: number | string } | undefined;
+			return sent?.message_id === undefined ? undefined : String(sent.message_id);
+		}
+
+		try {
+			await this.editOrReplaceMessage(parseInt(chatId, 10), parseInt(messageId, 10), content);
+			return messageId;
+		} catch (error) {
+			logger.warn("Failed to update memory review process log", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return messageId;
+		}
+	}
+
+	private formatMemoryRunLog(log: string[]): string {
+		return [
+			"Memory review run:",
+			...log.map((line) => `- ${line}`),
+		].join("\n");
+	}
+
+	private formatMemoryRunResult(result: MemoryReviewRunResult): string {
+		if (result.status === "completed") {
+			return [
+				`Completed: reviewed ${result.reviewedMessages} message${result.reviewedMessages === 1 ? "" : "s"}.`,
+				`Applied ${result.accepted}, staged ${result.staged}, rejected ${result.rejected}.`,
+			].join(" ");
+		}
+		if (result.status === "failed") {
+			return `Failed: ${result.error ?? "unknown error"}.`;
+		}
+		if (result.status === "no_messages") return "Completed: no messages needed review.";
+		if (result.status === "disabled") return "Skipped: memory review is disabled.";
+		return "Skipped: another memory review is already running.";
+	}
+
+	private formatMemoryHelp(): string {
+		return [
+			"Memory commands:",
+			"/memory status",
+			"/memory pending",
+			"/memory approve <id>",
+			"/memory reject <id>",
+			"/memory run",
+		].join("\n");
+	}
+
+	private formatPendingMemoryProposals(): string {
+		const rows = listPendingMemoryProposals();
+		if (rows.length === 0) return "No pending memory proposals.";
+		return [
+			"Pending memory proposals:",
+			...rows.map((row) => [
+				`- ${row.id.slice(0, 8)} (${row.target})`,
+				`  ${row.entry}`,
+				`  Rationale: ${row.rationale}`,
+			].join("\n")),
+		].join("\n");
+	}
+
+	private formatMemoryStatus(): string {
+		const status = getMemoryStatus();
+		return [
+			"Memory review:",
+			`- Enabled: ${this.config.memoryReviewEnabled ? "yes" : "no"}`,
+			`- Interval: ${this.config.memoryReviewIntervalMs}ms`,
+			`- Batch limit: ${this.config.memoryReviewBatchLimit}`,
+			`- Pending: ${status.pending}`,
+			`- Applied: ${status.applied}`,
+			`- Rejected: ${status.rejected}`,
+			`- Last review: ${this.memoryWorker?.getLastReviewAt() ?? "never"}`,
+		].join("\n");
+	}
+
 	private formatCronHelp(): string {
 		return [
 			"Cron commands:",
@@ -397,6 +561,6 @@ export class TelegramChannel {
 	}
 }
 
-export function createTelegramChannel(config: Config): TelegramChannel {
-	return new TelegramChannel(config);
+export function createTelegramChannel(config: Config, memoryWorker?: MemoryReviewWorker): TelegramChannel {
+	return new TelegramChannel(config, memoryWorker);
 }
