@@ -3,35 +3,18 @@ import { createTelegramChannel } from "./channels/telegram.js";
 import { loadConfig } from "./config.js";
 import { initializeDatabase } from "./db.js";
 import { ensureSandboxInitialized, resetSandbox } from "./extensions/sandbox/index.js";
+import { createCommandProcessor } from "./handler/command-processor.js";
+import { createTelegramHandlerDispatcher } from "./handler/dispatcher.js";
+import { createMessageProcessor } from "./handler/message-processor.js";
+import { processTelegramUpdate } from "./handler/pipeline.js";
+import { createUnsupportedProcessor } from "./handler/unsupported-processor.js";
 import { initializeLogger, logger, withLogContext } from "./logger.js";
 import {
-	insertMessage,
-	markMessageProcessed,
 	updateOrInsertAssistantMessage,
 } from "./message-repository.js";
 import { createMemoryReviewWorker } from "./memory/worker.js";
-import { type ActivityUpdate, checkPiAuth, runPiWithStreaming } from "./pi-runner.js";
+import { checkPiAuth } from "./pi-runner.js";
 import { ensureSoulPromptFile, ensureWorkspaceMemoryFiles } from "./pi-utils.js";
-import { ensureSession } from "./session-repository.js";
-import { getWorkspace } from "./workspace.js";
-
-const activityEmoji: Record<string, string> = {
-	thinking: "🧠",
-	reading: "📖",
-	writing: "✍️",
-	running: "⚡",
-	searching: "🔍",
-	working: "🔄",
-};
-
-function formatActivityStatus(activity: ActivityUpdate): string {
-	const emoji = activityEmoji[activity.type] || "🔄";
-	const detail = activity.detail ? `\n└─ ${activity.detail}` : "";
-	if (activity.elapsed === 0) {
-		return `${emoji} Working...`;
-	}
-	return `${emoji} Working...${detail} (${activity.elapsed}s)`;
-}
 
 async function main() {
 	return withLogContext({ operation: "startup" }, async () => {
@@ -65,7 +48,12 @@ async function main() {
 		}
 
 		const memoryWorker = createMemoryReviewWorker(config);
-		const channel = createTelegramChannel(config, memoryWorker);
+		const channel = createTelegramChannel(config);
+		const dispatcher = createTelegramHandlerDispatcher([
+			createMessageProcessor(),
+			createCommandProcessor(),
+			createUnsupportedProcessor(),
+		]);
 
 		channel.onMessageSent(async (sessionId, telegramMessageId, content, status) => {
 			await withLogContext(
@@ -81,104 +69,13 @@ async function main() {
 			);
 		});
 
-		channel.onMessage(async (chatId, telegramMessageId, content) => {
-			await withLogContext(
-				{
-					chatId,
-					telegramMessageId,
-					operation: "incoming_message",
-				},
-				async () => {
-					const session = ensureSession();
-					const sessionId = session.id;
-					await withLogContext({ sessionId }, async () => {
-						const userMsg = insertMessage({ sessionId, id: telegramMessageId, role: "user", content });
-						logger.debug(`Saved user message ${userMsg.id}`);
-
-						const startTime = Date.now();
-						const ackMsgId = await channel.sendAckMessage(
-							chatId,
-							sessionId,
-							formatActivityStatus({ type: "working", detail: "", elapsed: 0 }),
-						);
-
-						const workspace = await getWorkspace(chatId);
-						let lastActivityUpdate = Date.now();
-						let lastActivity: ActivityUpdate = { type: "working", detail: "", elapsed: 0 };
-						const ackInterval = setInterval(async () => {
-							if (ackMsgId === undefined) return;
-							const elapsed = Math.floor((Date.now() - startTime) / 1000);
-							const tick: ActivityUpdate = {
-								...lastActivity,
-								elapsed,
-							};
-							try {
-								await channel.updateOrSendMessage(
-									chatId,
-									sessionId,
-									formatActivityStatus(tick),
-									ackMsgId,
-									"ACK",
-								);
-							} catch {
-								// best effort tick updates
-							}
-						}, 5000);
-
-						try {
-							const result = await runPiWithStreaming(
-								config,
-								sessionId,
-								content,
-								workspace,
-								async (activity: ActivityUpdate) => {
-									if (ackMsgId === undefined) return;
-									lastActivity = activity;
-									const now = Date.now();
-									if (now - lastActivityUpdate < 2000) return;
-									lastActivityUpdate = now;
-									try {
-										await channel.updateOrSendMessage(
-											chatId,
-											sessionId,
-											formatActivityStatus(activity),
-											ackMsgId,
-											"ACK",
-										);
-									} catch {
-										logger.error("Failed to send activity progress update during streaming.");
-									}
-								},
-							);
-							clearInterval(ackInterval);
-
-							const finalContent = result.error
-								? `Error: ${result.error}`
-								: result.output || "(no response)";
-
-							await channel.updateOrSendMessage(
-								chatId,
-								sessionId,
-								finalContent,
-								ackMsgId,
-								"processed",
-							);
-							markMessageProcessed(userMsg.id, sessionId);
-						} catch (err) {
-							clearInterval(ackInterval);
-							const errorMsg = err instanceof Error ? err.message : "Unknown error";
-							await channel.updateOrSendMessage(
-								chatId,
-								sessionId,
-								`Failed to process: ${errorMsg}`,
-								ackMsgId,
-								"processed",
-							);
-							logger.error("Failed to process incoming message", err);
-						}
-					});
-				},
-			);
+		channel.onIncoming(async (update) => {
+			await processTelegramUpdate(update, {
+				config,
+				channel,
+				dispatcher,
+				memoryWorker,
+			});
 		});
 
 		const shutdown = () => {

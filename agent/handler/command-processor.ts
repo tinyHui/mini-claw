@@ -1,0 +1,333 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { restartCronPm2 } from "../cron/pm2.js";
+import { getSqlite } from "../db.js";
+import { logger, withLogContext } from "../logger.js";
+import {
+	applyPendingMemoryProposal,
+	getMemoryStatus,
+	listPendingMemoryProposals,
+	rejectMemoryProposal,
+} from "../memory/proposals.js";
+import type { MemoryReviewRunResult } from "../memory/worker.js";
+import { ensureSession, resetSession } from "../session-repository.js";
+import { formatPath, getWorkspace } from "../workspace.js";
+import type {
+	IncomingTelegramUpdate,
+	ProcessorContext,
+	ProcessorResult,
+	TelegramProcessor,
+} from "./types.js";
+
+interface CronCommandJobRow {
+	name: string;
+	cronExpression: string;
+	enabled: number;
+}
+
+interface CronCommandJobLookupRow extends CronCommandJobRow {
+	description: string;
+}
+
+export class CommandProcessor implements TelegramProcessor {
+	canHandle(update: IncomingTelegramUpdate): boolean {
+		return update.kind === "command";
+	}
+
+	async process(
+		update: IncomingTelegramUpdate,
+		context: ProcessorContext,
+	): Promise<ProcessorResult> {
+		if (update.kind !== "command") {
+			throw new Error("CommandProcessor received a non-command update");
+		}
+
+		switch (update.command) {
+			case "new":
+				return this.handleNewCommand(update);
+			case "status":
+				return this.handleStatusCommand(update);
+			case "cron":
+				return this.handleCronCommand(update, context);
+			case "memory":
+				return this.handleMemoryCommand(update, context);
+			default:
+				return { content: `Unknown command: /${update.command}` };
+		}
+	}
+
+	private async handleNewCommand(
+		update: Extract<IncomingTelegramUpdate, { kind: "command" }>,
+	): Promise<ProcessorResult> {
+		const session = resetSession();
+		await withLogContext(
+			{
+				operation: "session_reset",
+				chatId: update.chatId,
+				sessionId: session.id,
+			},
+			() => {
+				logger.info("Started a new session");
+			},
+		);
+		return { content: "New session started." };
+	}
+
+	private async handleStatusCommand(
+		update: Extract<IncomingTelegramUpdate, { kind: "command" }>,
+	): Promise<ProcessorResult> {
+		const cwd = await getWorkspace(update.chatId);
+		const session = ensureSession();
+		return {
+			content: `Status:\n- Chat ID: ${update.chatId}\n- Workspace: ${formatPath(cwd)}\n- Session: ${session.id.slice(0, 8)}…`,
+		};
+	}
+
+	private async handleCronCommand(
+		update: Extract<IncomingTelegramUpdate, { kind: "command" }>,
+		context: ProcessorContext,
+	): Promise<ProcessorResult> {
+		const [action, name] = update.args;
+		if (!action) return { content: this.formatCronHelp() };
+
+		if (action === "list") {
+			return { content: this.formatCronList() };
+		}
+
+		if (action === "restart") {
+			return { content: await this.restartCronFromCommand(update.chatId, context) };
+		}
+
+		if ((action === "disable" || action === "enable") && name) {
+			return {
+				content: await this.setCronEnabledFromCommand(
+					update.chatId,
+					context,
+					name,
+					action === "enable",
+				),
+			};
+		}
+
+		return { content: this.formatCronHelp() };
+	}
+
+	private async handleMemoryCommand(
+		update: Extract<IncomingTelegramUpdate, { kind: "command" }>,
+		context: ProcessorContext,
+	): Promise<ProcessorResult> {
+		const [action, id] = update.args;
+		if (!action) return { content: this.formatMemoryHelp() };
+
+		if (action === "pending") {
+			return { content: this.formatPendingMemoryProposals() };
+		}
+
+		if (action === "status") {
+			return { content: this.formatMemoryStatus(context) };
+		}
+
+		if (action === "run") {
+			return { content: await this.runMemoryReviewFromCommand(context) };
+		}
+
+		if (action === "approve" && id) {
+			const result = await applyPendingMemoryProposal(context.config.workspace, id);
+			return {
+				content: result ? `Approved memory proposal ${id}.` : `Pending memory proposal not found: ${id}`,
+			};
+		}
+
+		if (action === "reject" && id) {
+			const rejected = rejectMemoryProposal(id);
+			return {
+				content: rejected ? `Rejected memory proposal ${id}.` : `Pending memory proposal not found: ${id}`,
+			};
+		}
+
+		return { content: this.formatMemoryHelp() };
+	}
+
+	private async restartCronFromCommand(
+		chatId: string,
+		context: ProcessorContext,
+	): Promise<string> {
+		return withLogContext(
+			{
+				operation: "cron_scheduler_restart",
+				chatId,
+			},
+			async () => {
+				const result = await restartCronPm2({ appRoot: context.config.appRoot });
+				if (result.ok) {
+					logger.info("Restarted cron process via pm2");
+					return `Cron scheduler restarted (${result.processName}).`;
+				}
+
+				const errorMessage = result.error ?? (result.stderr || "unknown error");
+				logger.warn("Failed to restart cron process via pm2", {
+					error: errorMessage,
+				});
+				return `Failed to restart cron scheduler (${result.processName}): ${errorMessage}`;
+			},
+		);
+	}
+
+	private async runMemoryReviewFromCommand(context: ProcessorContext): Promise<string> {
+		const log = ["Starting manual memory review."];
+		await context.progress.update(this.formatMemoryRunLog(log));
+
+		if (!context.memoryWorker) {
+			log.push("Memory review worker is unavailable.");
+			await context.progress.update(this.formatMemoryRunLog(log));
+			return this.formatMemoryRunLog(log);
+		}
+
+		const result = await context.memoryWorker.runOnce(async (message) => {
+			log.push(message);
+			await context.progress.update(this.formatMemoryRunLog(log));
+		});
+
+		log.push(this.formatMemoryRunResult(result));
+		return this.formatMemoryRunLog(log);
+	}
+
+	private formatMemoryRunLog(log: string[]): string {
+		return [
+			"Memory review run:",
+			...log.map((line) => `- ${line}`),
+		].join("\n");
+	}
+
+	private formatMemoryRunResult(result: MemoryReviewRunResult): string {
+		if (result.status === "completed") {
+			return [
+				`Completed: reviewed ${result.reviewedMessages} message${result.reviewedMessages === 1 ? "" : "s"}.`,
+				`Applied ${result.accepted}, staged ${result.staged}, rejected ${result.rejected}.`,
+			].join(" ");
+		}
+		if (result.status === "failed") {
+			return `Failed: ${result.error ?? "unknown error"}.`;
+		}
+		if (result.status === "no_messages") return "Completed: no messages needed review.";
+		if (result.status === "disabled") return "Skipped: memory review is disabled.";
+		return "Skipped: another memory review is already running.";
+	}
+
+	private formatMemoryHelp(): string {
+		return [
+			"Memory commands:",
+			"/memory status",
+			"/memory pending",
+			"/memory approve <id>",
+			"/memory reject <id>",
+			"/memory run",
+		].join("\n");
+	}
+
+	private formatPendingMemoryProposals(): string {
+		const rows = listPendingMemoryProposals();
+		if (rows.length === 0) return "No pending memory proposals.";
+		return [
+			"Pending memory proposals:",
+			...rows.map((row) => [
+				`- ${row.id.slice(0, 8)} (${row.target})`,
+				`  ${row.entry}`,
+				`  Rationale: ${row.rationale}`,
+			].join("\n")),
+		].join("\n");
+	}
+
+	private formatMemoryStatus(context: ProcessorContext): string {
+		const status = getMemoryStatus();
+		return [
+			"Memory review:",
+			`- Enabled: ${context.config.memoryReviewEnabled ? "yes" : "no"}`,
+			`- Interval: ${context.config.memoryReviewIntervalMs}ms`,
+			`- Batch limit: ${context.config.memoryReviewBatchLimit}`,
+			`- Pending: ${status.pending}`,
+			`- Applied: ${status.applied}`,
+			`- Rejected: ${status.rejected}`,
+			`- Last review: ${context.memoryWorker?.getLastReviewAt() ?? "never"}`,
+		].join("\n");
+	}
+
+	private formatCronHelp(): string {
+		return [
+			"Cron commands:",
+			"/cron list",
+			"/cron disable <name>",
+			"/cron enable <name>",
+			"/cron restart",
+		].join("\n");
+	}
+
+	private formatCronList(): string {
+		const rows = getSqlite().prepare(`
+			SELECT name, cronExpression, enabled
+			FROM cron_jobs
+			ORDER BY name
+		`).all() as CronCommandJobRow[];
+
+		if (rows.length === 0) return "No cron jobs registered.";
+
+		return [
+			"Cron jobs:",
+			...rows.map((row) => `- ${row.name}: ${row.cronExpression} (${row.enabled === 1 ? "enabled" : "disabled"})`),
+		].join("\n");
+	}
+
+	private getCronJob(name: string): CronCommandJobLookupRow | undefined {
+		return getSqlite().prepare(`
+			SELECT name, description, cronExpression, enabled
+			FROM cron_jobs
+			WHERE name = ?
+		`).get(name) as CronCommandJobLookupRow | undefined;
+	}
+
+	private cronJobScriptExists(context: ProcessorContext, name: string): boolean {
+		return existsSync(join(context.config.cronDir, "jobs", `${name}.mjs`));
+	}
+
+	private async setCronEnabledFromCommand(
+		chatId: string,
+		context: ProcessorContext,
+		name: string,
+		enabled: boolean,
+	): Promise<string> {
+		return withLogContext(
+			{
+				operation: enabled ? "cron_enable" : "cron_disable",
+				chatId,
+				jobName: name,
+			},
+			async () => {
+				const job = this.getCronJob(name);
+				if (!job) {
+					return `Cron job not found: ${name}`;
+				}
+
+				if (enabled && !this.cronJobScriptExists(context, name)) {
+					return `Cannot enable ${name}: cron/jobs/${name}.mjs was not found.`;
+				}
+
+				getSqlite().prepare("UPDATE cron_jobs SET enabled = ? WHERE name = ?").run(enabled ? 1 : 0, name);
+				const result = await restartCronPm2({ appRoot: context.config.appRoot });
+				if (result.ok) {
+					logger.info(enabled ? "Enabled cron job and restarted cron process" : "Disabled cron job and restarted cron process");
+					return `Cron job ${name} ${enabled ? "enabled" : "disabled"}. Restarted ${result.processName}.`;
+				}
+
+				const errorMessage = result.error ?? (result.stderr || "unknown error");
+				logger.warn("Failed to restart cron process after cron job status update", {
+					error: errorMessage,
+				});
+				return `Cron job ${name} ${enabled ? "enabled" : "disabled"}, but failed to restart ${result.processName}: ${errorMessage}`;
+			},
+		);
+	}
+}
+
+export function createCommandProcessor(): CommandProcessor {
+	return new CommandProcessor();
+}

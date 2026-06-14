@@ -109,6 +109,7 @@ vi.mock("../db.js", () => ({
 }));
 
 import { TelegramChannel, toTelegramMarkdown, type TelegramMessageSentCallback } from "./telegram.js";
+import { checkRateLimit } from "../rate-limiter.js";
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
 	return {
@@ -368,18 +369,32 @@ describe("TelegramChannel", () => {
 		});
 	});
 
-	describe("commands", () => {
+	describe("incoming updates", () => {
 		function commandHandler(name: string) {
 			for (let index = mockCommand.mock.calls.length - 1; index >= 0; index -= 1) {
 				const call = mockCommand.mock.calls[index] as unknown[];
 				if (call[0] === name) {
 					return call[1] as
-						| ((ctx: { chat: { id: number }; message?: { text: string }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
+						| ((ctx: { chat: { id: number }; message?: { text: string; message_id?: number } }) => Promise<void>)
 						| undefined;
 				}
 			}
 			return undefined as
-				| ((ctx: { chat: { id: number }; message?: { text: string }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
+				| ((ctx: { chat: { id: number }; message?: { text: string; message_id?: number } }) => Promise<void>)
+				| undefined;
+		}
+
+		function textHandler() {
+			const call = mockOn.mock.calls.find((item) => item[0] === "message:text") as unknown[] | undefined;
+			return call?.[1] as
+				| ((ctx: { chat: { id: number }; message: { text: string; message_id: number }; reply: ReturnType<typeof vi.fn> }) => Promise<void>)
+				| undefined;
+		}
+
+		function unsupportedHandler() {
+			const call = mockOn.mock.calls.find((item) => Array.isArray(item[0])) as unknown[] | undefined;
+			return call?.[1] as
+				| ((ctx: { chat: { id: number }; message: { message_id: number; photo?: unknown } }) => Promise<void>)
 				| undefined;
 		}
 
@@ -397,215 +412,78 @@ describe("TelegramChannel", () => {
 			expect(mockCommand).toHaveBeenCalledTimes(4);
 		});
 
-		it("starts a new session with /new", async () => {
-			const reply = vi.fn().mockResolvedValue(undefined);
-			await commandHandler("new")?.({ chat: { id: 123 }, reply });
+		it("emits normalized command updates", async () => {
+			const callback = vi.fn().mockResolvedValue(undefined);
+			channel.onIncoming(callback);
 
-			expect(mockResetSession).toHaveBeenCalledOnce();
-			expect(reply).toHaveBeenCalledWith("New session started.");
-		});
-
-		it("shows /cron help when no parameter is provided", async () => {
-			const reply = vi.fn().mockResolvedValue(undefined);
-			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron" }, reply });
-
-			expect(reply).toHaveBeenCalledWith([
-				"Cron commands:",
-				"/cron list",
-				"/cron disable <name>",
-				"/cron enable <name>",
-				"/cron restart",
-			].join("\n"));
-		});
-
-		it("restarts cron with /cron restart", async () => {
-			const reply = vi.fn().mockResolvedValue(undefined);
-			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron restart" }, reply });
-
-			expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
-			expect(reply).toHaveBeenCalledWith("Cron scheduler restarted (mini-claw-cron).");
-		});
-
-		it("reports cron restart failure with /cron restart", async () => {
-			mockRestartCronPm2.mockResolvedValueOnce({
-				ok: false,
-				processName: "mini-claw-cron",
-				command: "pm2 restart mini-claw-cron",
-				stdout: "",
-				stderr: "not found",
-				error: "not found",
+			await commandHandler("cron")?.({
+				chat: { id: 123 },
+				message: { text: "/cron@mini_claw_bot disable digest", message_id: 77 },
 			});
-			const reply = vi.fn().mockResolvedValue(undefined);
 
-			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron restart" }, reply });
-
-			expect(reply).toHaveBeenCalledWith(
-				"Failed to restart cron scheduler (mini-claw-cron): not found",
-			);
-		});
-
-		it("lists cron jobs from the DB", async () => {
-			mockCronDb([
-				{ name: "digest", cronExpression: "0 8 * * *", enabled: 1 },
-				{ name: "cleanup", cronExpression: "0 1 * * *", enabled: 0 },
-			]);
-			const reply = vi.fn().mockResolvedValue(undefined);
-
-			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron list" }, reply });
-
-			expect(reply).toHaveBeenCalledWith([
-				"Cron jobs:",
-				"- digest: 0 8 * * * (enabled)",
-				"- cleanup: 0 1 * * * (disabled)",
-			].join("\n"));
-		});
-
-		it("disables a cron job and restarts the cron process", async () => {
-			const db = mockCronDb([{ name: "digest", cronExpression: "0 8 * * *", enabled: 1 }]);
-			const reply = vi.fn().mockResolvedValue(undefined);
-
-			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron disable digest" }, reply });
-
-			expect(db.updateRun).toHaveBeenCalledWith(0, "digest");
-			expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
-			expect(reply).toHaveBeenCalledWith("Cron job digest disabled. Restarted mini-claw-cron.");
-		});
-
-		it("enables a cron job when its script file exists", async () => {
-			const db = mockCronDb([{ name: "digest", cronExpression: "0 8 * * *", enabled: 0 }]);
-			mockExistsSync.mockReturnValueOnce(true);
-			const reply = vi.fn().mockResolvedValue(undefined);
-
-			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron enable digest" }, reply });
-
-			expect(mockExistsSync).toHaveBeenCalledWith("/app/cron/jobs/digest.mjs");
-			expect(db.updateRun).toHaveBeenCalledWith(1, "digest");
-			expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
-			expect(reply).toHaveBeenCalledWith("Cron job digest enabled. Restarted mini-claw-cron.");
-		});
-
-		it("rejects enabling a cron job when its script file is missing", async () => {
-			const db = mockCronDb([{ name: "digest", cronExpression: "0 8 * * *", enabled: 0 }]);
-			mockExistsSync.mockReturnValueOnce(false);
-			const reply = vi.fn().mockResolvedValue(undefined);
-
-			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron enable digest" }, reply });
-
-			expect(db.updateRun).not.toHaveBeenCalled();
-			expect(mockRestartCronPm2).not.toHaveBeenCalled();
-			expect(reply).toHaveBeenCalledWith("Cannot enable digest: cron/jobs/digest.mjs was not found.");
-		});
-
-		it("does not restart when a cron job name is not found", async () => {
-			mockCronDb([]);
-			const reply = vi.fn().mockResolvedValue(undefined);
-
-			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron disable missing" }, reply });
-
-			expect(mockRestartCronPm2).not.toHaveBeenCalled();
-			expect(reply).toHaveBeenCalledWith("Cron job not found: missing");
-		});
-
-		it("reports restart failure after updating cron job status", async () => {
-			const db = mockCronDb([{ name: "digest", cronExpression: "0 8 * * *", enabled: 1 }]);
-			mockRestartCronPm2.mockResolvedValueOnce({
-				ok: false,
-				processName: "mini-claw-cron",
-				command: "pm2 restart mini-claw-cron",
-				stdout: "",
-				stderr: "not found",
-				error: "not found",
+			expect(callback).toHaveBeenCalledWith({
+				kind: "command",
+				chatId: "123",
+				telegramMessageId: "77",
+				text: "/cron@mini_claw_bot disable digest",
+				command: "cron",
+				args: ["disable", "digest"],
 			});
-			const reply = vi.fn().mockResolvedValue(undefined);
-
-			await commandHandler("cron")?.({ chat: { id: 123 }, message: { text: "/cron disable digest" }, reply });
-
-			expect(db.updateRun).toHaveBeenCalledWith(0, "digest");
-			expect(reply).toHaveBeenCalledWith(
-				"Cron job digest disabled, but failed to restart mini-claw-cron: not found",
-			);
 		});
 
-		it("lists pending memory proposals", async () => {
-			mockListPendingMemoryProposals.mockReturnValueOnce([{
-				id: "abcdef123456",
-				target: "USER",
-				entry: "Prefers concise updates.",
-				rationale: "The user asked for short responses.",
-				createdAt: "2026-06-13T00:00:00.000Z",
-				evidenceMessageIdsJson: "[]",
-				status: "pending",
-				source: "background_review",
-				appliedAt: null,
-				beforeHash: null,
-				afterHash: null,
-			}]);
-			const reply = vi.fn().mockResolvedValue(undefined);
+		it("emits normalized text message updates after rate limiting", async () => {
+			vi.mocked(checkRateLimit).mockReturnValue({ allowed: true });
+			const callback = vi.fn().mockResolvedValue(undefined);
+			channel.onIncoming(callback);
 
-			await commandHandler("memory")?.({ chat: { id: 123 }, message: { text: "/memory pending" }, reply });
-
-			expect(reply).toHaveBeenCalledWith(expect.stringContaining("Prefers concise updates."));
-		});
-
-		it("approves a pending memory proposal", async () => {
-			mockApplyPendingMemoryProposal.mockResolvedValueOnce({ id: "abc123" });
-			const reply = vi.fn().mockResolvedValue(undefined);
-
-			await commandHandler("memory")?.({ chat: { id: 123 }, message: { text: "/memory approve abc123" }, reply });
-
-			expect(mockApplyPendingMemoryProposal).toHaveBeenCalledWith("/tmp/ws", "abc123");
-			expect(reply).toHaveBeenCalledWith("Approved memory proposal abc123.");
-		});
-
-		it("rejects a pending memory proposal", async () => {
-			mockRejectMemoryProposal.mockReturnValueOnce(true);
-			const reply = vi.fn().mockResolvedValue(undefined);
-
-			await commandHandler("memory")?.({ chat: { id: 123 }, message: { text: "/memory reject abc123" }, reply });
-
-			expect(mockRejectMemoryProposal).toHaveBeenCalledWith("abc123");
-			expect(reply).toHaveBeenCalledWith("Rejected memory proposal abc123.");
-		});
-
-		it("updates a process log while /memory run is running", async () => {
-			mockEditMessageText.mockResolvedValue(true);
-			const runOnce = vi.fn(async (onProgress?: (message: string) => Promise<void> | void) => {
-				await onProgress?.("Preparing workspace memory files.");
-				await onProgress?.("Reviewing 2 processed messages.");
-				return {
-					status: "completed" as const,
-					reviewedMessages: 2,
-					accepted: 1,
-					staged: 1,
-					rejected: 0,
-				};
+			await textHandler()?.({
+				chat: { id: 123 },
+				message: { text: "hello", message_id: 88 },
+				reply: vi.fn(),
 			});
-			channel = new TelegramChannel(makeConfig(), {
-				runOnce,
-				stop: vi.fn(),
-				getLastReviewAt: vi.fn(),
+
+			expect(callback).toHaveBeenCalledWith({
+				kind: "message",
+				chatId: "123",
+				telegramMessageId: "88",
+				text: "hello",
 			});
-			const reply = vi.fn().mockResolvedValue({ message_id: 77 });
+		});
 
-			await commandHandler("memory")?.({ chat: { id: 123 }, message: { text: "/memory run" }, reply });
+		it("replies with rate limit text and does not emit an update", async () => {
+			vi.mocked(checkRateLimit).mockReturnValue({
+				allowed: false,
+				retryAfterMs: 2500,
+			});
+			const callback = vi.fn().mockResolvedValue(undefined);
+			const reply = vi.fn().mockResolvedValue(undefined);
+			channel.onIncoming(callback);
 
-			expect(reply).toHaveBeenCalledWith([
-				"Memory review run:",
-				"- Starting manual memory review.",
-			].join("\n"));
-			expect(runOnce).toHaveBeenCalledOnce();
-			expect(mockEditMessageText).toHaveBeenCalledWith(
-				123,
-				77,
-				expect.stringContaining("Reviewing 2 processed messages."),
-				{ parse_mode: "MarkdownV2" },
-			);
-			expect(mockEditMessageText).toHaveBeenLastCalledWith(
-				123,
-				77,
-				expect.stringContaining("Applied 1, staged 1, rejected 0."),
-				{ parse_mode: "MarkdownV2" },
-			);
+			await textHandler()?.({
+				chat: { id: 123 },
+				message: { text: "hello", message_id: 88 },
+				reply,
+			});
+
+			expect(reply).toHaveBeenCalledWith("Please wait 3s before sending another message.");
+			expect(callback).not.toHaveBeenCalled();
+		});
+
+		it("emits normalized unsupported updates", async () => {
+			const callback = vi.fn().mockResolvedValue(undefined);
+			channel.onIncoming(callback);
+
+			await unsupportedHandler()?.({
+				chat: { id: 123 },
+				message: { message_id: 99, photo: [] },
+			});
+
+			expect(callback).toHaveBeenCalledWith({
+				kind: "unsupported",
+				chatId: "123",
+				telegramMessageId: "99",
+				messageType: "photo",
+			});
 		});
 	});
 });

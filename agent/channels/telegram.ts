@@ -1,20 +1,8 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { Bot, Context, GrammyError } from "grammy";
 import type { Config } from "../config.js";
-import { restartCronPm2 } from "../cron/pm2.js";
-import { getSqlite } from "../db.js";
 import { logger, withLogContext } from "../logger.js";
-import {
-	applyPendingMemoryProposal,
-	getMemoryStatus,
-	listPendingMemoryProposals,
-	rejectMemoryProposal,
-} from "../memory/proposals.js";
-import type { MemoryReviewRunResult, MemoryReviewWorker } from "../memory/worker.js";
 import { checkRateLimit } from "../rate-limiter.js";
-import { ensureSession, resetSession } from "../session-repository.js";
-import { formatPath, getWorkspace } from "../workspace.js";
+import type { IncomingTelegramUpdate } from "../handler/types.js";
 import { sendTelegramText, TELEGRAM_MAX_MESSAGE_LENGTH } from "./telegram-delivery.js";
 import { toTelegramMarkdown } from "./telegram-format.js";
 export { toTelegramMarkdown } from "./telegram-format.js";
@@ -22,9 +10,7 @@ export { toTelegramMarkdown } from "./telegram-format.js";
 export type DeliveryStatus = "ACK" | "processed";
 
 export type TelegramMessageCallback = (
-	chatId: string,
-	telegramMessageId: string,
-	content: string,
+	update: IncomingTelegramUpdate,
 ) => Promise<void>;
 
 export type TelegramMessageSentCallback = (
@@ -34,37 +20,24 @@ export type TelegramMessageSentCallback = (
 	status: DeliveryStatus,
 ) => Promise<void>;
 
-interface CronCommandJobRow {
-	name: string;
-	cronExpression: string;
-	enabled: number;
-}
-
-interface CronCommandJobLookupRow extends CronCommandJobRow {
-	description: string;
-}
-
-function parseCronCommandArgs(text?: string): string[] {
-	const args = (text ?? "").replace(/^\/cron(?:@\S+)?/, "").trim();
-	return args ? args.split(/\s+/) : [];
-}
-
 export class TelegramChannel {
 	private bot: Bot<Context>;
 	private config: Config;
-	private memoryWorker?: MemoryReviewWorker;
 	private messageCallback: TelegramMessageCallback | null = null;
 	private messageSentCallback: TelegramMessageSentCallback | null = null;
 
-	constructor(config: Config, memoryWorker?: MemoryReviewWorker) {
+	constructor(config: Config) {
 		this.config = config;
-		this.memoryWorker = memoryWorker;
 		this.bot = new Bot<Context>(config.telegramToken);
 		this.setupHandlers();
 	}
 
-	onMessage(callback: TelegramMessageCallback): void {
+	onIncoming(callback: TelegramMessageCallback): void {
 		this.messageCallback = callback;
+	}
+
+	onMessage(callback: TelegramMessageCallback): void {
+		this.onIncoming(callback);
 	}
 
 	onMessageSent(callback: TelegramMessageSentCallback): void {
@@ -75,12 +48,13 @@ export class TelegramChannel {
 		chatId: string,
 		sessionId: string,
 		content: string,
+		syncDelivery = true,
 	): Promise<string | undefined> {
 		const telegramChatId = parseInt(chatId, 10);
 		try {
 			const msg = await this.bot.api.sendMessage(telegramChatId, content);
 			const ackMsgId = String(msg.message_id);
-			if (this.messageSentCallback) {
+			if (syncDelivery && this.messageSentCallback) {
 				await this.messageSentCallback(sessionId, ackMsgId, content, "ACK");
 			}
 			return ackMsgId;
@@ -95,6 +69,7 @@ export class TelegramChannel {
 		content: string,
 		telegramMessageId?: string,
 		status: DeliveryStatus = "processed",
+		syncDelivery = true,
 	): Promise<void> {
 		const telegramChatId = parseInt(chatId, 10);
 
@@ -104,7 +79,7 @@ export class TelegramChannel {
 			await this.sendNewMessage(telegramChatId, content);
 		}
 
-		if (status === "processed" && this.messageSentCallback) {
+		if (syncDelivery && status === "processed" && this.messageSentCallback) {
 			await this.messageSentCallback(sessionId, telegramMessageId ?? "unknown", content, "processed");
 		}
 	}
@@ -200,42 +175,19 @@ export class TelegramChannel {
 		this.bot.api.setMyCommands(commands).catch(() => {});
 
 		this.bot.command("new", async (ctx) => {
-			const session = resetSession();
-			await withLogContext(
-				{
-					operation: "session_reset",
-					chatId: String(ctx.chat.id),
-					sessionId: session.id,
-				},
-				() => {
-					logger.info("Started a new session");
-				},
-			);
-			await ctx.reply("New session started.");
+			await this.emitCommand(ctx, "new");
 		});
 
 		this.bot.command("cron", async (ctx) => {
-			await this.handleCronCommand(
-				String(ctx.chat.id),
-				ctx.message?.text,
-				ctx.reply.bind(ctx),
-			);
+			await this.emitCommand(ctx, "cron");
 		});
 
 		this.bot.command("memory", async (ctx) => {
-			await this.handleMemoryCommand(
-				String(ctx.chat.id),
-				ctx.message?.text,
-				ctx.reply.bind(ctx),
-			);
+			await this.emitCommand(ctx, "memory");
 		});
 
 		this.bot.command("status", async (ctx) => {
-			const cwd = await getWorkspace(String(ctx.chat.id));
-			const session = ensureSession();
-			await ctx.reply(
-				`Status:\n- Chat ID: ${ctx.chat.id}\n- Workspace: ${formatPath(cwd)}\n- Session: ${session.id.slice(0, 8)}…`,
-			);
+			await this.emitCommand(ctx, "status");
 		});
 
 		this.bot.on("message:text", async (ctx) => {
@@ -255,15 +207,16 @@ export class TelegramChannel {
 			}
 
 			if (this.messageCallback) {
-				await this.messageCallback(
-					String(ctx.chat.id),
-					String(ctx.message.message_id),
+				await this.messageCallback({
+					kind: "message",
+					chatId: String(ctx.chat.id),
+					telegramMessageId: String(ctx.message.message_id),
 					text,
-				);
+				});
 			}
 		});
 
-		this.bot.on([
+		const unsupportedTypes = [
 			"message:photo",
 			"message:document",
 			"message:video",
@@ -274,293 +227,56 @@ export class TelegramChannel {
 			"message:video_note",
 			"message:contact",
 			"message:location",
-		], async (ctx) => {
-			await ctx.reply("This message type is not supported yet.");
-		});
-	}
-
-	private async restartCronFromCommand(
-		chatId: string,
-		reply: (text: string) => Promise<unknown>,
-	): Promise<void> {
-		await withLogContext(
-			{
-				operation: "cron_scheduler_restart",
-				chatId,
-			},
-			async () => {
-				const result = await restartCronPm2({ appRoot: this.config.appRoot });
-				if (result.ok) {
-					logger.info("Restarted cron process via pm2");
-					await reply(`Cron scheduler restarted (${result.processName}).`);
-				} else {
-					const errorMessage = result.error ?? (result.stderr || "unknown error");
-					logger.warn("Failed to restart cron process via pm2", {
-						error: errorMessage,
-					});
-					await reply(
-						`Failed to restart cron scheduler (${result.processName}): ${errorMessage}`,
-					);
-				}
-			},
-		);
-	}
-
-	private async handleCronCommand(
-		chatId: string,
-		text: string | undefined,
-		reply: (text: string) => Promise<unknown>,
-	): Promise<void> {
-		const [action, name] = parseCronCommandArgs(text);
-		if (!action) {
-			await reply(this.formatCronHelp());
-			return;
-		}
-
-		if (action === "list") {
-			await reply(this.formatCronList());
-			return;
-		}
-
-		if (action === "restart") {
-			await this.restartCronFromCommand(chatId, reply);
-			return;
-		}
-
-		if ((action === "disable" || action === "enable") && name) {
-			await this.setCronEnabledFromCommand(chatId, reply, name, action === "enable");
-			return;
-		}
-
-		await reply(this.formatCronHelp());
-	}
-
-	private async handleMemoryCommand(
-		chatId: string,
-		text: string | undefined,
-		reply: (text: string) => Promise<unknown>,
-	): Promise<void> {
-		const [, action, id] = text?.match(/^\/memory(?:@\S+)?(?:\s+(\S+))?(?:\s+(\S+))?/) ?? [];
-		if (!action) {
-			await reply(this.formatMemoryHelp());
-			return;
-		}
-
-		if (action === "pending") {
-			await reply(this.formatPendingMemoryProposals());
-			return;
-		}
-
-		if (action === "status") {
-			await reply(this.formatMemoryStatus());
-			return;
-		}
-
-		if (action === "run") {
-			await this.runMemoryReviewFromCommand(chatId, reply);
-			return;
-		}
-
-		if (action === "approve" && id) {
-			const result = await applyPendingMemoryProposal(this.config.workspace, id);
-			await reply(result ? `Approved memory proposal ${id}.` : `Pending memory proposal not found: ${id}`);
-			return;
-		}
-
-		if (action === "reject" && id) {
-			const rejected = rejectMemoryProposal(id);
-			await reply(rejected ? `Rejected memory proposal ${id}.` : `Pending memory proposal not found: ${id}`);
-			return;
-		}
-
-		await reply(this.formatMemoryHelp());
-	}
-
-	private async runMemoryReviewFromCommand(
-		chatId: string,
-		reply: (text: string) => Promise<unknown>,
-	): Promise<void> {
-		const log = ["Starting manual memory review."];
-		let messageId = await this.updateMemoryRunLog(chatId, undefined, log, reply);
-
-		if (!this.memoryWorker) {
-			log.push("Memory review worker is unavailable.");
-			await this.updateMemoryRunLog(chatId, messageId, log, reply);
-			return;
-		}
-
-		const result = await this.memoryWorker.runOnce(async (message) => {
-			log.push(message);
-			messageId = await this.updateMemoryRunLog(chatId, messageId, log, reply);
-		});
-
-		log.push(this.formatMemoryRunResult(result));
-		await this.updateMemoryRunLog(chatId, messageId, log, reply);
-	}
-
-	private async updateMemoryRunLog(
-		chatId: string,
-		messageId: string | undefined,
-		log: string[],
-		reply: (text: string) => Promise<unknown>,
-	): Promise<string | undefined> {
-		const content = this.formatMemoryRunLog(log);
-		if (!messageId) {
-			const sent = await reply(content) as { message_id?: number | string } | undefined;
-			return sent?.message_id === undefined ? undefined : String(sent.message_id);
-		}
-
-		try {
-			await this.editOrReplaceMessage(parseInt(chatId, 10), parseInt(messageId, 10), content);
-			return messageId;
-		} catch (error) {
-			logger.warn("Failed to update memory review process log", {
-				error: error instanceof Error ? error.message : String(error),
+		] as Parameters<Bot<Context>["on"]>[0];
+		this.bot.on(unsupportedTypes, async (ctx) => {
+			if (!this.messageCallback) return;
+			if (!ctx.chat) return;
+			await this.messageCallback({
+				kind: "unsupported",
+				chatId: String(ctx.chat.id),
+				telegramMessageId: String(ctx.message?.message_id ?? "unknown"),
+				messageType: this.detectUnsupportedMessageType(ctx),
 			});
-			return messageId;
+		});
+	}
+
+	private async emitCommand(ctx: Context, fallbackCommand: string): Promise<void> {
+		if (!this.messageCallback) return;
+		if (!ctx.chat) return;
+		const text = ctx.message?.text ?? `/${fallbackCommand}`;
+		const commandToken = text.match(/^\/([^\s@]+)(?:@\S+)?/)?.[1] ?? fallbackCommand;
+		const args = text.replace(/^\/[^\s@]+(?:@\S+)?/, "").trim();
+		await this.messageCallback({
+			kind: "command",
+			chatId: String(ctx.chat.id),
+			telegramMessageId: String(ctx.message?.message_id ?? "unknown"),
+			text,
+			command: commandToken,
+			args: args ? args.split(/\s+/) : [],
+		});
+	}
+
+	private detectUnsupportedMessageType(ctx: Context): string {
+		const message = ctx.message as Record<string, unknown> | undefined;
+		if (!message) return "unknown";
+		for (const key of [
+			"photo",
+			"document",
+			"video",
+			"voice",
+			"audio",
+			"sticker",
+			"animation",
+			"video_note",
+			"contact",
+			"location",
+		]) {
+			if (key in message) return key;
 		}
-	}
-
-	private formatMemoryRunLog(log: string[]): string {
-		return [
-			"Memory review run:",
-			...log.map((line) => `- ${line}`),
-		].join("\n");
-	}
-
-	private formatMemoryRunResult(result: MemoryReviewRunResult): string {
-		if (result.status === "completed") {
-			return [
-				`Completed: reviewed ${result.reviewedMessages} message${result.reviewedMessages === 1 ? "" : "s"}.`,
-				`Applied ${result.accepted}, staged ${result.staged}, rejected ${result.rejected}.`,
-			].join(" ");
-		}
-		if (result.status === "failed") {
-			return `Failed: ${result.error ?? "unknown error"}.`;
-		}
-		if (result.status === "no_messages") return "Completed: no messages needed review.";
-		if (result.status === "disabled") return "Skipped: memory review is disabled.";
-		return "Skipped: another memory review is already running.";
-	}
-
-	private formatMemoryHelp(): string {
-		return [
-			"Memory commands:",
-			"/memory status",
-			"/memory pending",
-			"/memory approve <id>",
-			"/memory reject <id>",
-			"/memory run",
-		].join("\n");
-	}
-
-	private formatPendingMemoryProposals(): string {
-		const rows = listPendingMemoryProposals();
-		if (rows.length === 0) return "No pending memory proposals.";
-		return [
-			"Pending memory proposals:",
-			...rows.map((row) => [
-				`- ${row.id.slice(0, 8)} (${row.target})`,
-				`  ${row.entry}`,
-				`  Rationale: ${row.rationale}`,
-			].join("\n")),
-		].join("\n");
-	}
-
-	private formatMemoryStatus(): string {
-		const status = getMemoryStatus();
-		return [
-			"Memory review:",
-			`- Enabled: ${this.config.memoryReviewEnabled ? "yes" : "no"}`,
-			`- Interval: ${this.config.memoryReviewIntervalMs}ms`,
-			`- Batch limit: ${this.config.memoryReviewBatchLimit}`,
-			`- Pending: ${status.pending}`,
-			`- Applied: ${status.applied}`,
-			`- Rejected: ${status.rejected}`,
-			`- Last review: ${this.memoryWorker?.getLastReviewAt() ?? "never"}`,
-		].join("\n");
-	}
-
-	private formatCronHelp(): string {
-		return [
-			"Cron commands:",
-			"/cron list",
-			"/cron disable <name>",
-			"/cron enable <name>",
-			"/cron restart",
-		].join("\n");
-	}
-
-	private formatCronList(): string {
-		const rows = getSqlite().prepare(`
-			SELECT name, cronExpression, enabled
-			FROM cron_jobs
-			ORDER BY name
-		`).all() as CronCommandJobRow[];
-
-		if (rows.length === 0) return "No cron jobs registered.";
-
-		return [
-			"Cron jobs:",
-			...rows.map((row) => `- ${row.name}: ${row.cronExpression} (${row.enabled === 1 ? "enabled" : "disabled"})`),
-		].join("\n");
-	}
-
-	private getCronJob(name: string): CronCommandJobLookupRow | undefined {
-		return getSqlite().prepare(`
-			SELECT name, description, cronExpression, enabled
-			FROM cron_jobs
-			WHERE name = ?
-		`).get(name) as CronCommandJobLookupRow | undefined;
-	}
-
-	private cronJobScriptExists(name: string): boolean {
-		return existsSync(join(this.config.cronDir, "jobs", `${name}.mjs`));
-	}
-
-	private async setCronEnabledFromCommand(
-		chatId: string,
-		reply: (text: string) => Promise<unknown>,
-		name: string,
-		enabled: boolean,
-	): Promise<void> {
-		await withLogContext(
-			{
-				operation: enabled ? "cron_enable" : "cron_disable",
-				chatId,
-				jobName: name,
-			},
-			async () => {
-				const job = this.getCronJob(name);
-				if (!job) {
-					await reply(`Cron job not found: ${name}`);
-					return;
-				}
-
-				if (enabled && !this.cronJobScriptExists(name)) {
-					await reply(`Cannot enable ${name}: cron/jobs/${name}.mjs was not found.`);
-					return;
-				}
-
-				getSqlite().prepare("UPDATE cron_jobs SET enabled = ? WHERE name = ?").run(enabled ? 1 : 0, name);
-				const result = await restartCronPm2({ appRoot: this.config.appRoot });
-				if (result.ok) {
-					logger.info(enabled ? "Enabled cron job and restarted cron process" : "Disabled cron job and restarted cron process");
-					await reply(`Cron job ${name} ${enabled ? "enabled" : "disabled"}. Restarted ${result.processName}.`);
-				} else {
-					const errorMessage = result.error ?? (result.stderr || "unknown error");
-					logger.warn("Failed to restart cron process after cron job status update", {
-						error: errorMessage,
-					});
-					await reply(
-						`Cron job ${name} ${enabled ? "enabled" : "disabled"}, but failed to restart ${result.processName}: ${errorMessage}`,
-					);
-				}
-			},
-		);
+		return "unknown";
 	}
 }
 
-export function createTelegramChannel(config: Config, memoryWorker?: MemoryReviewWorker): TelegramChannel {
-	return new TelegramChannel(config, memoryWorker);
+export function createTelegramChannel(config: Config): TelegramChannel {
+	return new TelegramChannel(config);
 }
