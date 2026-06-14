@@ -186,6 +186,25 @@ pnpm typecheck
 pnpm lint
 ```
 
+## Testing
+
+Run `make test` before finishing any change that touches source or test files.
+
+### Database-backed tests
+
+- Use `createMigratedDatabase()` from [`agent/test-database.ts`](agent/test-database.ts) to set up an isolated SQLite file with the full Drizzle schema.
+- Commit both `drizzle/*.sql` and `drizzle/meta/_journal.json`. Do not gitignore the journal — CI needs it for programmatic migrations in tests.
+
+### Temp directories and filesystem behavior
+
+- Create temp dirs with `mkdtemp(join(tmpdir(), "prefix-"))`, not bare `join(tmpdir(), ...)`, to avoid collisions under parallel test runs.
+- When asserting behavior based on file modification time, set explicit mtimes with `utimes` after writing files. Linux CI can assign identical mtimes to back-to-back writes, making sort order depend on `readdir` order instead of write sequence.
+- Resolve repo-relative paths via `import.meta.url`, not `process.cwd()`, so tests stay correct if the runner cwd changes.
+
+### Teardown
+
+- Guard cleanup when setup can fail (for example `sqlite?.close()` in `afterEach`) so a failed `beforeEach` does not mask the root error with a secondary `TypeError`.
+
 ## Deployment
 
 ### Option 1: pm2 + systemd (Linux)

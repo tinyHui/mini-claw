@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -78,6 +78,8 @@ describe("session-history-path", () => {
 			const stubLine = `${JSON.stringify({ type: "session" })}\n`;
 			await writeFile(older, stubLine, "utf8");
 			await writeFile(newer, stubLine, "utf8");
+			await utimes(older, new Date("2026-03-20T08:00:00Z"), new Date("2026-03-20T08:00:00Z"));
+			await utimes(newer, new Date("2026-03-22T08:00:00Z"), new Date("2026-03-22T08:00:00Z"));
 
 			const p = await resolveSessionHistoryPath(
 				dir,

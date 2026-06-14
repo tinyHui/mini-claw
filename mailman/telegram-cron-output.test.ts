@@ -69,7 +69,7 @@ describe("telegram cron output mailman", () => {
 	});
 
 	afterEach(async () => {
-		sqlite.close();
+		sqlite?.close();
 		await rm(root, { recursive: true, force: true });
 	});
 
