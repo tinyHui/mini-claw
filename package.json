@@ -5,22 +5,22 @@
   "type": "module",
   "main": "dist/agent/index.js",
   "imports": {
-    "#cron/*": "./cron/*"
+    "#cron/*": "./generated/cron/*"
   },
   "scripts": {
     "pi": "pi",
     "dev": "tsx watch agent/index.ts",
     "build": "tsc",
     "start": "node dist/agent/index.js",
-    "cron": "node cron/scheduler.mjs",
+    "cron": "node dist/cron/scheduler.js",
     "pm2:start": "pnpm build && pm2 start ecosystem.config.cjs",
-    "pm2:restart": "pnpm build && pm2 restart ecosystem.config.cjs",
+    "pm2:restart": "pnpm build && pm2 startOrReload ecosystem.config.cjs --update-env",
     "pm2:stop": "pm2 stop ecosystem.config.cjs",
     "pm2:logs": "pm2 logs mini-claw mini-claw-cron mini-claw-mailman",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint agent/ cron/*.mjs mailman/",
+    "lint": "eslint agent/ cron/ mailman/",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

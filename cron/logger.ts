@@ -15,7 +15,7 @@ const CONSOLE_FORMAT =
 	`${GREEN}{time}${RESET} [${BLUE}{level}${RESET}] ${MAGENTA}{namespace}${RESET}: {message} ${GRAY}{context}${RESET}{error}`;
 const FILE_FORMAT = "{date} {time} [{level}] {namespace}: {message} {context}{error}";
 
-function parseLogLevel(level) {
+function parseLogLevel(level: string | undefined): LogLevel {
 	switch (level?.trim().toUpperCase()) {
 		case "TRACE": return LogLevel.TRACE;
 		case "DEBUG": return LogLevel.DEBUG;
@@ -26,7 +26,7 @@ function parseLogLevel(level) {
 	}
 }
 
-export function initializeLogger(logLevel, workspace) {
+export function initializeLogger(logLevel: string | undefined, workspace: string): void {
 	const level = parseLogLevel(logLevel);
 	logManager.configure({
 		minLevel: level,
@@ -48,13 +48,13 @@ export function initializeLogger(logLevel, workspace) {
 const baseLogger = logManager.getLogger("mini-claw-cron");
 
 export const logger = {
-	info(message, context) {
+	info(message: string, context?: Record<string, unknown>) {
 		baseLogger.info(message, context);
 	},
-	warn(message, context) {
+	warn(message: string, context?: Record<string, unknown>) {
 		baseLogger.warn(message, context);
 	},
-	error(message, error, context) {
+	error(message: string, error?: unknown, context?: Record<string, unknown>) {
 		baseLogger.error(message, error instanceof Error ? error : undefined, context);
 	},
 };

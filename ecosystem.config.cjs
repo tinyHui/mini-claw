@@ -10,7 +10,7 @@ const sharedEnv = {
 	MINI_CLAW_APP_ROOT:
 		fileEnv.MINI_CLAW_APP_ROOT || process.env.MINI_CLAW_APP_ROOT || appRoot,
 	MINI_CLAW_CRON_DIR:
-		fileEnv.MINI_CLAW_CRON_DIR || process.env.MINI_CLAW_CRON_DIR || path.join(appRoot, "cron"),
+		fileEnv.MINI_CLAW_CRON_DIR || process.env.MINI_CLAW_CRON_DIR || path.join(appRoot, "generated", "cron"),
 };
 
 module.exports = {
@@ -25,7 +25,7 @@ module.exports = {
 		},
 		{
 			name: "mini-claw-cron",
-			script: "cron/scheduler.mjs",
+			script: "dist/cron/scheduler.js",
 			cwd: appRoot,
 			interpreter: "node",
 			time: true,

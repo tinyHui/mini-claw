@@ -13,7 +13,7 @@ function makeConfig(workspace: string): Config {
 	return {
 		telegramToken: "token",
 		appRoot: "/app",
-		cronDir: "/app/cron",
+		cronDir: "/app/generated/cron",
 		workspace,
 		sessionDir: "/sessions",
 		logLevel: "info",

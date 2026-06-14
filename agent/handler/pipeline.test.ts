@@ -35,7 +35,7 @@ function makeConfig(): Config {
 	return {
 		telegramToken: "fake-token",
 		appRoot: "/app",
-		cronDir: "/app/cron",
+		cronDir: "/app/generated/cron",
 		workspace: "/tmp/ws",
 		sessionDir: "/tmp/sessions",
 		logLevel: "debug",

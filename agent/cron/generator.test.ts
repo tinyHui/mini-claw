@@ -84,7 +84,7 @@ describe("generateCronArtifacts", () => {
 				restartCronProcess: async () => ({
 					ok: true,
 					processName: "mini-claw-cron",
-					command: "pm2 restart mini-claw-cron",
+					command: "pm2 startOrReload ecosystem.config.cjs --only mini-claw-cron --update-env",
 					stdout: "",
 					stderr: "",
 				}),
@@ -194,7 +194,7 @@ describe("generateCronArtifacts", () => {
 				restartCronProcess: async () => ({
 					ok: false,
 					processName: "mini-claw-cron",
-					command: "pm2 restart mini-claw-cron",
+					command: "pm2 startOrReload ecosystem.config.cjs --only mini-claw-cron --update-env",
 					stdout: "",
 					stderr: "process not found",
 					error: "process not found",
@@ -252,7 +252,7 @@ describe("generateCronArtifacts", () => {
 					return {
 						ok: true,
 						processName: "mini-claw-cron",
-						command: "pm2 restart mini-claw-cron",
+						command: "pm2 startOrReload ecosystem.config.cjs --only mini-claw-cron --update-env",
 						stdout: "",
 						stderr: "",
 					};

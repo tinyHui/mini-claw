@@ -18,8 +18,7 @@ describe("cron output store", () => {
 	});
 
 	it("persists pending cron output rows", async () => {
-		// @ts-expect-error cron runtime modules are plain JavaScript executed by Node.
-		const { publishCronOutput } = await import("./output-store.mjs");
+		const { publishCronOutput } = await import("./output-store.js");
 
 		const row = publishCronOutput(
 			{ jobName: "digest", content: "hello from cron" },

@@ -1,11 +1,12 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { initializeLogger, logger } from "./logger.mjs";
-import { startCronScheduler } from "./scheduler-runtime.mjs";
+import { initializeLogger, logger } from "./logger.js";
+import { startCronScheduler } from "./scheduler-runtime.js";
+import { getDefaultGeneratedCronDir } from "./paths.js";
 
 const schedulerDir = dirname(fileURLToPath(import.meta.url));
-const appRoot = resolve(schedulerDir, "..");
-const cronDir = resolve(process.env.MINI_CLAW_CRON_DIR || schedulerDir);
+const appRoot = resolve(schedulerDir, "..", "..");
+const cronDir = resolve(process.env.MINI_CLAW_CRON_DIR || getDefaultGeneratedCronDir(appRoot));
 const logWorkspace = process.env.MINI_CLAW_WORKSPACE || appRoot;
 const logLevel = process.env.LOG_LEVEL || "info";
 

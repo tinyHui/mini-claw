@@ -72,7 +72,7 @@ describe("pi-runner", () => {
 	const config: Config = {
 		telegramToken: "token",
 		appRoot: "/app",
-		cronDir: "/app/cron",
+		cronDir: "/app/generated/cron",
 		workspace: "/workspace",
 		sessionDir: "/sessions",
 		logLevel: "info",

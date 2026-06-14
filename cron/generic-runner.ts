@@ -1,29 +1,31 @@
 import { isMainThread, workerData } from "node:worker_threads";
 import { pathToFileURL } from "node:url";
-import { join, resolve } from "node:path";
-import { logger } from "./logger.mjs";
-import { publishCronOutput } from "./output-store.mjs";
-import { validateJobName } from "./validation.mjs";
+import { logger } from "./logger.js";
+import { publishCronOutput } from "./output-store.js";
+import { validateJobName } from "./validation.js";
+import { getDefaultGeneratedCronDir, getJobScriptPath } from "./paths.js";
 
-function errorMessage(error) {
+function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-function getJobModulePath(task, cronDir) {
-	return join(cronDir, "jobs", `${task}.mjs`);
+interface CronTaskInput {
+	task: string;
+	cronDir?: string;
+	dbPath?: string;
 }
 
 export async function executeCronTask({
 	task,
-	cronDir = resolve(process.cwd(), "cron"),
+	cronDir = getDefaultGeneratedCronDir(),
 	dbPath,
-}) {
+}: CronTaskInput) {
 	const nameErrors = validateJobName(task);
 	if (nameErrors.length > 0) {
 		throw new Error(`Invalid cron task "${task}": ${nameErrors.join(" ")}`);
 	}
 
-	const modulePath = getJobModulePath(task, cronDir);
+	const modulePath = getJobScriptPath(cronDir, task);
 	const imported = await import(pathToFileURL(modulePath).href);
 	if (typeof imported.run !== "function") {
 		throw new Error(`Cron task "${task}" must export async function run().`);
@@ -37,17 +39,19 @@ export async function executeCronTask({
 	return publishCronOutput({ jobName: task, content: result }, dbPath);
 }
 
-export async function runGenericCronWorker(data = workerData) {
+export async function runGenericCronWorker(data = workerData as Partial<CronTaskInput> | undefined) {
 	const task = data?.task;
 	if (typeof task !== "string" || task.trim() === "") {
 		throw new Error("Generic cron runner requires workerData.task.");
 	}
+	const cronDir = data?.cronDir;
+	const dbPath = data?.dbPath;
 
 	try {
 		const row = await executeCronTask({
 			task,
-			cronDir: data.cronDir,
-			dbPath: data.dbPath,
+			cronDir,
+			dbPath,
 		});
 		logger.info("Cron task output persisted", {
 			operation: "cron_task_output_persisted",
@@ -64,7 +68,7 @@ export async function runGenericCronWorker(data = workerData) {
 		publishCronOutput({
 			jobName: task,
 			content: `Cron task "${task}" failed:\n${message}`,
-		}, data?.dbPath);
+		}, dbPath);
 		throw error;
 	}
 }

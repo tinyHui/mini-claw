@@ -1,11 +1,19 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
-import { writeCronRegistry } from "./registry.mjs";
-import { validateCronRuntime } from "./scanner.mjs";
+import { writeCronRegistry } from "./registry.js";
+import { validateCronRuntime, type CronValidationResult } from "./scanner.js";
+import { getDefaultGeneratedCronDir } from "./paths.js";
 
-function parseArgs(argv) {
-	const args = {
-		cronDir: "cron",
+interface ValidatorArgs {
+	cronDir: string;
+	json: boolean;
+	writeDb: boolean;
+	help?: boolean;
+}
+
+function parseArgs(argv: string[]): ValidatorArgs {
+	const args: ValidatorArgs = {
+		cronDir: getDefaultGeneratedCronDir(),
 		json: false,
 		writeDb: false,
 	};
@@ -28,7 +36,7 @@ function parseArgs(argv) {
 	return args;
 }
 
-function printHuman(result) {
+function printHuman(result: CronValidationResult): void {
 	console.log(`Cron validation ${result.ok ? "passed" : "failed"}`);
 	console.log(`Jobs: ${result.counts.jobs}`);
 	console.log(`Capabilities: ${result.counts.capabilities}`);
@@ -40,11 +48,14 @@ function printHuman(result) {
 	}
 }
 
-async function main() {
-	const args = parseArgs(process.argv.slice(2));
+export async function runValidatorCommand(argv: string[]): Promise<{
+	args: ValidatorArgs;
+	result?: CronValidationResult;
+	exitCode: number;
+}> {
+	const args = parseArgs(argv);
 	if (args.help) {
-		console.log("Usage: node cron/validator.mjs --cron-dir <cronDir> [--json] [--write-db]");
-		return 0;
+		return { args, exitCode: 0 };
 	}
 
 	const result = await validateCronRuntime(resolve(args.cronDir));
@@ -52,19 +63,26 @@ async function main() {
 		result.registry = writeCronRegistry(result);
 	}
 
+	return { args, result, exitCode: result.ok ? 0 : 1 };
+}
+
+async function main(): Promise<number> {
+	const { args, result, exitCode } = await runValidatorCommand(process.argv.slice(2));
+	if (args.help) {
+		console.log("Usage: node dist/cron/validator.js --cron-dir <cronDir> [--json] [--write-db]");
+		return exitCode;
+	}
+	if (!result) return exitCode;
 	if (args.json) {
 		console.log(JSON.stringify(result, null, 2));
 	} else {
 		printHuman(result);
 	}
-
-	return result.ok ? 0 : 1;
+	return exitCode;
 }
 
-try {
-	process.exitCode = await main();
-} catch (error) {
-	const diagnostic = {
+function errorDiagnostic(error: unknown): CronValidationResult {
+	return {
 		ok: false,
 		counts: { jobs: 0, capabilities: 0, errors: 1, warnings: 0 },
 		successes: [],
@@ -76,10 +94,18 @@ try {
 		jobs: [],
 		capabilities: [],
 	};
-	if (process.argv.includes("--json")) {
-		console.log(JSON.stringify(diagnostic, null, 2));
-	} else {
-		console.error(diagnostic.errors[0].message);
+}
+
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+	try {
+		process.exitCode = await main();
+	} catch (error) {
+		const diagnostic = errorDiagnostic(error);
+		if (process.argv.includes("--json")) {
+			console.log(JSON.stringify(diagnostic, null, 2));
+		} else {
+			console.error(diagnostic.errors[0]?.message);
+		}
+		process.exitCode = 1;
 	}
-	process.exitCode = 1;
 }

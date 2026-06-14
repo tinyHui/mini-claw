@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Codex, type FileChangeItem, type ThreadItem } from "@openai/codex-sdk";
+import { CRON_CAPABILITIES_DIR, CRON_JOBS_DIR, CRON_OUTPUT_DIR } from "../../cron/paths.js";
 import { getSqlite } from "../db.js";
 import { restartCronPm2, type Pm2RestartResult } from "./pm2.js";
 
@@ -103,9 +104,9 @@ const OUTPUT_SCHEMA = {
 };
 
 async function ensureCronDirectories(cronDir: string): Promise<void> {
-	await mkdir(join(cronDir, "jobs"), { recursive: true });
-	await mkdir(join(cronDir, "capabilities"), { recursive: true });
-	await mkdir(join(cronDir, "output"), { recursive: true });
+	await mkdir(join(cronDir, CRON_JOBS_DIR), { recursive: true });
+	await mkdir(join(cronDir, CRON_CAPABILITIES_DIR), { recursive: true });
+	await mkdir(join(cronDir, CRON_OUTPUT_DIR), { recursive: true });
 }
 
 function isInside(parent: string, candidate: string): boolean {
@@ -163,10 +164,10 @@ function buildPrompt(context: CronRegistryContext, request: string): string {
 		"",
 		"Write files only inside this working directory. Do not edit files outside it.",
 		"Use this required structure:",
-		"- jobs/<name>.mjs",
-		"- jobs/<name>.cron",
-		"- capabilities/<seq-name>/manifest.yaml",
-		"- capabilities/<seq-name>/index.mjs",
+		`- ${CRON_JOBS_DIR}/<name>.mjs`,
+		`- ${CRON_JOBS_DIR}/<name>.cron`,
+		`- ${CRON_CAPABILITIES_DIR}/<seq-name>/manifest.yaml`,
+		`- ${CRON_CAPABILITIES_DIR}/<seq-name>/index.mjs`,
 		"",
 		"Job rules:",
 		"- Use ESM .mjs files.",
@@ -210,7 +211,7 @@ function parseStructuredResponse(response: string): { summary?: string; files?: 
 }
 
 async function runCronValidator(input: { appRoot: string; cronDir: string }): Promise<ValidatorProcessResult> {
-	const validatorPath = join(input.appRoot, "cron", "validator.mjs");
+	const validatorPath = join(input.appRoot, "dist", "cron", "validator.js");
 	const args = [validatorPath, "--cron-dir", input.cronDir, "--json", "--write-db"];
 	try {
 		const result = await execFileAsync(process.execPath, args, {

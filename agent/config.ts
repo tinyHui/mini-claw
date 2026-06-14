@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { GENERATED_CRON_DIR } from "../cron/paths.js";
 
 export interface Config {
 	telegramToken: string;
@@ -38,7 +39,7 @@ export function loadConfig(): Config {
 
 	const cronDir =
 		process.env.MINI_CLAW_CRON_DIR?.trim() ||
-		join(appRoot, "cron");
+		join(appRoot, GENERATED_CRON_DIR);
 
 	const sessionDir =
 		process.env.MINI_CLAW_SESSION_DIR?.trim() ||

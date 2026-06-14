@@ -5,8 +5,22 @@ const CAPABILITY_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const CRON_FIELD_RE = /^[A-Za-z0-9*?,/#LW-]+$/;
 const DESCRIPTION_RE = /^\s*\/\/\s*description:\s*(\S.*)$/im;
 
-export function validateJobName(name) {
-	const errors = [];
+export interface ValidationDiagnostic {
+	level: "error" | "warn";
+	file?: string;
+	message: string;
+	type?: string;
+}
+
+export interface CapabilityManifest {
+	name: string;
+	description: string;
+	input_schema: unknown;
+	output_schema: unknown;
+}
+
+export function validateJobName(name: string): string[] {
+	const errors: string[] = [];
 	if (!name.trim()) {
 		errors.push("Job name is required.");
 		return errors;
@@ -22,8 +36,8 @@ export function validateJobName(name) {
 	return errors;
 }
 
-export function validateCapabilitySlug(slug) {
-	const errors = [];
+export function validateCapabilitySlug(slug: string): string[] {
+	const errors: string[] = [];
 	if (!slug.trim()) {
 		errors.push("Capability slug is required.");
 		return errors;
@@ -39,11 +53,11 @@ export function validateCapabilitySlug(slug) {
 	return errors;
 }
 
-export function validateCronExpression(expression) {
+export function validateCronExpression(expression: string): string[] {
 	const trimmed = expression.trim();
 	if (!trimmed) return ["Cron expression is required."];
 
-	const errors = [];
+	const errors: string[] = [];
 	const fields = trimmed.split(/\s+/);
 	if (fields.length !== 5 && fields.length !== 6) {
 		errors.push("Cron expression must have 5 fields, or 6 fields when seconds are used.");
@@ -58,17 +72,20 @@ export function validateCronExpression(expression) {
 	return errors;
 }
 
-export function hasCronSeconds(expression) {
+export function hasCronSeconds(expression: string): boolean {
 	return expression.trim().split(/\s+/).length === 6;
 }
 
-export function extractJobDescription(content) {
+export function extractJobDescription(content: string): string | undefined {
 	const match = DESCRIPTION_RE.exec(content);
 	return match?.[1]?.trim();
 }
 
-export function parseCapabilityManifest(content, file) {
-	const diagnostics = [];
+export function parseCapabilityManifest(content: string, file: string): {
+	diagnostics: ValidationDiagnostic[];
+	manifest?: CapabilityManifest;
+} {
+	const diagnostics: ValidationDiagnostic[] = [];
 	let parsed;
 	try {
 		parsed = parse(content);

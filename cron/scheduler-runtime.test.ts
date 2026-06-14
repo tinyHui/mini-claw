@@ -7,13 +7,17 @@ import { createMigratedDatabase } from "../agent/test-database.js";
 
 const repoRoot = process.cwd();
 
+function cronRoot(root: string): string {
+	return join(root, "generated", "cron");
+}
+
 async function writeScheduledJob(root: string, name: string): Promise<void> {
-	await mkdir(join(root, "cron", "jobs"), { recursive: true });
+	await mkdir(join(cronRoot(root), "jobs"), { recursive: true });
 	await writeFile(
-		join(root, "cron", "jobs", `${name}.mjs`),
+		join(cronRoot(root), "jobs", `${name}.mjs`),
 		`// description: ${name} job\nexport async function run() { return ${JSON.stringify(name)}; }\n`,
 	);
-	await writeFile(join(root, "cron", "jobs", `${name}.cron`), "0 8 * * *\n");
+	await writeFile(join(cronRoot(root), "jobs", `${name}.cron`), "0 8 * * *\n");
 }
 
 function insertCronJob(root: string, name: string, enabled = 1): void {
@@ -29,8 +33,8 @@ function insertCronJob(root: string, name: string, enabled = 1): void {
 		description: `${name} job`,
 		cronExpression: "0 8 * * *",
 		enabled,
-		scriptPath: `cron/jobs/${name}.mjs`,
-		schedulePath: `cron/jobs/${name}.cron`,
+		scriptPath: `${name}.mjs`,
+		schedulePath: `${name}.cron`,
 	});
 	sqlite.close();
 }
@@ -50,24 +54,23 @@ describe("cron scheduler runtime", () => {
 	it("registers scanned jobs against the generic runner with task worker data", async () => {
 		await writeScheduledJob(root, "digest");
 		insertCronJob(root, "digest");
-		// @ts-expect-error cron runtime modules are plain JavaScript executed by Node.
-		const { buildCronScheduler } = await import("./scheduler-runtime.mjs");
+		const { buildCronScheduler } = await import("./scheduler-runtime.js");
 
 		const built = await buildCronScheduler({
-			cronDir: join(root, "cron"),
+			cronDir: cronRoot(root),
 			dbPath: join(root, "miniclaw.db"),
 		});
 
 		expect(built.bree.config.jobs).toEqual([
 			expect.objectContaining({
 				name: "digest",
-				path: join(repoRoot, "cron", "generic-runner.mjs"),
+				path: join(repoRoot, "cron", "generic-runner.js"),
 				cron: "0 8 * * *",
 				hasSeconds: false,
 				worker: {
 					workerData: {
 						task: "digest",
-						cronDir: join(root, "cron"),
+						cronDir: cronRoot(root),
 					},
 				},
 			}),
@@ -77,11 +80,10 @@ describe("cron scheduler runtime", () => {
 	it("does not register disabled DB jobs", async () => {
 		await writeScheduledJob(root, "digest");
 		insertCronJob(root, "digest", 0);
-		// @ts-expect-error cron runtime modules are plain JavaScript executed by Node.
-		const { buildCronScheduler } = await import("./scheduler-runtime.mjs");
+		const { buildCronScheduler } = await import("./scheduler-runtime.js");
 
 		const built = await buildCronScheduler({
-			cronDir: join(root, "cron"),
+			cronDir: cronRoot(root),
 			dbPath: join(root, "miniclaw.db"),
 		});
 
@@ -91,11 +93,10 @@ describe("cron scheduler runtime", () => {
 
 	it("deletes and skips enabled DB jobs when the script file is missing", async () => {
 		insertCronJob(root, "missing", 1);
-		// @ts-expect-error cron runtime modules are plain JavaScript executed by Node.
-		const { buildCronScheduler } = await import("./scheduler-runtime.mjs");
+		const { buildCronScheduler } = await import("./scheduler-runtime.js");
 
 		const built = await buildCronScheduler({
-			cronDir: join(root, "cron"),
+			cronDir: cronRoot(root),
 			dbPath: join(root, "miniclaw.db"),
 		});
 

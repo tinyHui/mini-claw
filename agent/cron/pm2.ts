@@ -32,7 +32,7 @@ export async function restartCronPm2(
 ): Promise<Pm2RestartResult> {
 	const processName = options.processName ?? "mini-claw-cron";
 	const pm2Bin = resolvePm2Bin(options.appRoot);
-	const args = [pm2Bin, "restart", processName];
+	const args = [pm2Bin, "startOrReload", "ecosystem.config.cjs", "--only", processName, "--update-env"];
 	const command = `${process.execPath} ${args.join(" ")}`;
 
 	return new Promise((resolveResult) => {

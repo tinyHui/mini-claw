@@ -1,11 +1,12 @@
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import type { CronValidationResult } from "./scanner.js";
 
 export function getDefaultDatabasePath() {
 	return join(process.cwd(), "miniclaw.db");
 }
 
-function deleteMissing(sqlite, table, key, values) {
+function deleteMissing(sqlite: Database.Database, table: string, key: string, values: string[]): void {
 	if (values.length === 0) {
 		sqlite.prepare(`DELETE FROM ${table}`).run();
 		return;
@@ -14,7 +15,7 @@ function deleteMissing(sqlite, table, key, values) {
 	sqlite.prepare(`DELETE FROM ${table} WHERE ${key} NOT IN (${placeholders})`).run(...values);
 }
 
-export function writeCronRegistry(validation, dbPath = getDefaultDatabasePath()) {
+export function writeCronRegistry(validation: CronValidationResult, dbPath = getDefaultDatabasePath()) {
 	const sqlite = new Database(dbPath, { fileMustExist: true });
 	try {
 		const write = sqlite.transaction(() => {

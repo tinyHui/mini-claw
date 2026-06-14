@@ -1,15 +1,14 @@
-import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase } from "../agent/test-database.js";
+import { runValidatorCommand } from "./validator.js";
 
-const execFileAsync = promisify(execFile);
-const repoRoot = process.cwd();
-const validatorPath = join(repoRoot, "cron", "validator.mjs");
+function cronRoot(root: string): string {
+	return join(root, "generated", "cron");
+}
 
 interface ValidatorRun {
 	exitCode: number;
@@ -24,43 +23,41 @@ interface ValidatorRun {
 }
 
 async function runValidator(root: string, writeDb = false): Promise<ValidatorRun> {
-	const args = [validatorPath, "--cron-dir", join(root, "cron"), "--json"];
-	if (writeDb) args.push("--write-db");
+	const previousCwd = process.cwd();
 	try {
-		const result = await execFileAsync(process.execPath, args, {
-			cwd: root,
-			encoding: "utf-8",
-		});
+		process.chdir(root);
+		const result = await runValidatorCommand(["--cron-dir", cronRoot(root), "--json", ...(writeDb ? ["--write-db"] : [])]);
 		return {
-			exitCode: 0,
-			stdout: result.stdout,
-			stderr: result.stderr,
-			json: JSON.parse(result.stdout),
+			exitCode: result.exitCode,
+			stdout: JSON.stringify(result.result),
+			stderr: "",
+			json: result.result as ValidatorRun["json"],
 		};
 	} catch (error) {
-		const failed = error as Error & { code?: number; stdout?: string; stderr?: string };
 		return {
-			exitCode: typeof failed.code === "number" ? failed.code : 1,
-			stdout: failed.stdout ?? "",
-			stderr: failed.stderr ?? failed.message,
-			json: JSON.parse(failed.stdout ?? "{}"),
+			exitCode: 1,
+			stdout: "",
+			stderr: error instanceof Error ? error.message : String(error),
+			json: {} as ValidatorRun["json"],
 		};
+	} finally {
+		process.chdir(previousCwd);
 	}
 }
 
 async function writeValidJob(root: string, name = "digest"): Promise<void> {
-	await mkdir(join(root, "cron", "jobs"), { recursive: true });
+	await mkdir(join(cronRoot(root), "jobs"), { recursive: true });
 	await writeFile(
-		join(root, "cron", "jobs", `${name}.mjs`),
+		join(cronRoot(root), "jobs", `${name}.mjs`),
 		`// description: ${name} job\nexport async function run() { return ${JSON.stringify(name)}; }\n`,
 	);
-	await writeFile(join(root, "cron", "jobs", `${name}.cron`), "0 8 * * *\n");
+	await writeFile(join(cronRoot(root), "jobs", `${name}.cron`), "0 8 * * *\n");
 }
 
 async function writeValidCapability(root: string): Promise<void> {
-	await mkdir(join(root, "cron", "capabilities", "001-summary"), { recursive: true });
+	await mkdir(join(cronRoot(root), "capabilities", "001-summary"), { recursive: true });
 	await writeFile(
-		join(root, "cron", "capabilities", "001-summary", "manifest.yaml"),
+		join(cronRoot(root), "capabilities", "001-summary", "manifest.yaml"),
 		[
 			"name: summary",
 			"description: Summarises text for cron jobs.",
@@ -72,7 +69,7 @@ async function writeValidCapability(root: string): Promise<void> {
 		].join("\n"),
 	);
 	await writeFile(
-		join(root, "cron", "capabilities", "001-summary", "index.mjs"),
+		join(cronRoot(root), "capabilities", "001-summary", "index.mjs"),
 		"export async function summarize() { return {}; }\n",
 	);
 }
@@ -95,15 +92,15 @@ describe("cron validator", () => {
 			INSERT INTO cron_jobs (
 				name, description, cronExpression, enabled, hasSeconds, scriptPath, schedulePath, contentHash, validatedAt
 			) VALUES (
-				'stale', 'Stale', '0 1 * * *', 1, 0, 'cron/jobs/stale.mjs', 'cron/jobs/stale.cron', 'old', '2026-01-01T00:00:00.000Z'
+				'stale', 'Stale', '0 1 * * *', 1, 0, 'stale.mjs', 'stale.cron', 'old', '2026-01-01T00:00:00.000Z'
 			)
 		`).run();
 		sqlite.prepare(`
 			INSERT INTO cron_capabilities (
 				slug, name, description, manifestPath, entrypointPath, inputSchemaJson, outputSchemaJson, contentHash, validatedAt
 			) VALUES (
-				'999-stale', 'stale', 'Stale', 'cron/capabilities/999-stale/manifest.yaml',
-				'cron/capabilities/999-stale/index.mjs', '{}', '{}', 'old', '2026-01-01T00:00:00.000Z'
+				'999-stale', 'stale', 'Stale', 'manifest.yaml',
+				'index.mjs', '{}', '{}', 'old', '2026-01-01T00:00:00.000Z'
 			)
 		`).run();
 		sqlite.close();
@@ -118,8 +115,8 @@ describe("cron validator", () => {
 		expect(result.json.counts.capabilities).toBe(1);
 
 		const verified = new Database(join(root, "miniclaw.db"));
-		const jobs = verified.prepare("SELECT name, description, cronExpression, enabled, hasSeconds FROM cron_jobs").all();
-		const capabilities = verified.prepare("SELECT slug, name, description FROM cron_capabilities").all();
+		const jobs = verified.prepare("SELECT name, description, cronExpression, enabled, hasSeconds, scriptPath, schedulePath FROM cron_jobs").all();
+		const capabilities = verified.prepare("SELECT slug, name, description, manifestPath, entrypointPath FROM cron_capabilities").all();
 		verified.close();
 		expect(jobs).toEqual([{
 			name: "digest",
@@ -127,11 +124,15 @@ describe("cron validator", () => {
 			cronExpression: "0 8 * * *",
 			enabled: 1,
 			hasSeconds: 0,
+			scriptPath: "digest.mjs",
+			schedulePath: "digest.cron",
 		}]);
 		expect(capabilities).toEqual([{
 			slug: "001-summary",
 			name: "summary",
 			description: "Summarises text for cron jobs.",
+			manifestPath: "manifest.yaml",
+			entrypointPath: "index.mjs",
 		}]);
 	});
 
@@ -143,7 +144,7 @@ describe("cron validator", () => {
 			INSERT INTO cron_jobs (
 				name, description, cronExpression, enabled, hasSeconds, scriptPath, schedulePath, contentHash, validatedAt
 			) VALUES (
-				'digest', 'Old digest', '0 1 * * *', 0, 0, 'cron/jobs/digest.mjs', 'cron/jobs/digest.cron', 'old', '2026-01-01T00:00:00.000Z'
+				'digest', 'Old digest', '0 1 * * *', 0, 0, 'digest.mjs', 'digest.cron', 'old', '2026-01-01T00:00:00.000Z'
 			)
 		`).run();
 		sqlite.close();
@@ -162,8 +163,8 @@ describe("cron validator", () => {
 	});
 
 	it("reports missing schedules", async () => {
-		await mkdir(join(root, "cron", "jobs"), { recursive: true });
-		await writeFile(join(root, "cron", "jobs", "missing.mjs"), "// description: Missing schedule\n");
+		await mkdir(join(cronRoot(root), "jobs"), { recursive: true });
+		await writeFile(join(cronRoot(root), "jobs", "missing.mjs"), "// description: Missing schedule\n");
 
 		const result = await runValidator(root);
 
@@ -176,8 +177,8 @@ describe("cron validator", () => {
 	});
 
 	it("reports orphan schedules as warnings", async () => {
-		await mkdir(join(root, "cron", "jobs"), { recursive: true });
-		await writeFile(join(root, "cron", "jobs", "orphan.cron"), "0 8 * * *\n");
+		await mkdir(join(cronRoot(root), "jobs"), { recursive: true });
+		await writeFile(join(cronRoot(root), "jobs", "orphan.cron"), "0 8 * * *\n");
 
 		const result = await runValidator(root);
 
@@ -190,9 +191,9 @@ describe("cron validator", () => {
 	});
 
 	it("reports invalid cron expressions", async () => {
-		await mkdir(join(root, "cron", "jobs"), { recursive: true });
-		await writeFile(join(root, "cron", "jobs", "bad.mjs"), "// description: Bad cron\n");
-		await writeFile(join(root, "cron", "jobs", "bad.cron"), "not a cron\n");
+		await mkdir(join(cronRoot(root), "jobs"), { recursive: true });
+		await writeFile(join(cronRoot(root), "jobs", "bad.mjs"), "// description: Bad cron\n");
+		await writeFile(join(cronRoot(root), "jobs", "bad.cron"), "not a cron\n");
 
 		const result = await runValidator(root);
 
@@ -201,9 +202,9 @@ describe("cron validator", () => {
 	});
 
 	it("reports missing job descriptions", async () => {
-		await mkdir(join(root, "cron", "jobs"), { recursive: true });
-		await writeFile(join(root, "cron", "jobs", "no_description.mjs"), "console.log('missing');\n");
-		await writeFile(join(root, "cron", "jobs", "no_description.cron"), "0 8 * * *\n");
+		await mkdir(join(cronRoot(root), "jobs"), { recursive: true });
+		await writeFile(join(cronRoot(root), "jobs", "no_description.mjs"), "console.log('missing');\n");
+		await writeFile(join(cronRoot(root), "jobs", "no_description.cron"), "0 8 * * *\n");
 
 		const result = await runValidator(root);
 
@@ -216,9 +217,9 @@ describe("cron validator", () => {
 	});
 
 	it("reports malformed capability manifests", async () => {
-		await mkdir(join(root, "cron", "capabilities", "001-bad"), { recursive: true });
-		await writeFile(join(root, "cron", "capabilities", "001-bad", "manifest.yaml"), "name: [\n");
-		await writeFile(join(root, "cron", "capabilities", "001-bad", "index.mjs"), "export {};\n");
+		await mkdir(join(cronRoot(root), "capabilities", "001-bad"), { recursive: true });
+		await writeFile(join(cronRoot(root), "capabilities", "001-bad", "manifest.yaml"), "name: [\n");
+		await writeFile(join(cronRoot(root), "capabilities", "001-bad", "index.mjs"), "export {};\n");
 
 		const result = await runValidator(root);
 

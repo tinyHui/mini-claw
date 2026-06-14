@@ -122,13 +122,13 @@ describe("sandbox-factory", () => {
 		});
 
 		it("allows writes inside configured extra paths", async () => {
-			const handler = setupToolCallHandler("/workspace/user1_sess1", ["/app/cron"]);
+			const handler = setupToolCallHandler("/workspace/user1_sess1", ["/app/generated/cron"]);
 
 			const result = await handler({
 				type: "tool_call",
 				toolName: "write",
 				toolCallId: "tc1",
-				input: { path: "/app/cron/jobs/digest.mjs" },
+				input: { path: "/app/generated/cron/jobs/digest.mjs" },
 			});
 
 			expect(result).toBeUndefined();

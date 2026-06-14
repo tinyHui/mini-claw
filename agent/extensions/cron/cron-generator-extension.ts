@@ -9,7 +9,7 @@ export interface CronGeneratorExtensionOptions {
 
 function formatGeneratedFiles(files: string[]): string {
 	if (files.length === 0) return "No file changes were reported.";
-	return files.map((file) => `- cron/${file}`).join("\n");
+	return files.map((file) => `- generated/cron/${file}`).join("\n");
 }
 
 export function createCronGeneratorExtensionFactory(
@@ -22,7 +22,7 @@ export function createCronGeneratorExtensionFactory(
 			description:
 				"Generate or update Mini-Claw cron jobs and capabilities from a natural-language request. Use only for cron job creation or cron capability authoring.",
 			promptSnippet:
-				"generate_cron_artifacts: create or update files under cron/jobs and cron/capabilities for scheduled tasks",
+				"generate_cron_artifacts: create or update files under generated/cron/jobs and generated/cron/capabilities for scheduled tasks",
 			promptGuidelines: [
 				"When the user asks to schedule recurring autonomous work, use the cron-job-authoring skill and this tool.",
 				"Do not invent Telegram slash commands for cron management.",

@@ -77,7 +77,7 @@ function makeConfig(): Config {
 	return {
 		telegramToken: "fake-token",
 		appRoot: "/app",
-		cronDir: "/app/cron",
+		cronDir: "/app/generated/cron",
 		workspace: "/tmp/ws",
 		sessionDir: "/tmp/sessions",
 		logLevel: "debug",
@@ -140,7 +140,7 @@ describe("CommandProcessor", () => {
 		mockRestartCronPm2.mockResolvedValue({
 			ok: true,
 			processName: "mini-claw-cron",
-			command: "pm2 restart mini-claw-cron",
+			command: "pm2 startOrReload ecosystem.config.cjs --only mini-claw-cron --update-env",
 			stdout: "",
 			stderr: "",
 		});
@@ -178,7 +178,7 @@ describe("CommandProcessor", () => {
 			args: ["enable", "digest"],
 		}, makeContext());
 
-		expect(mockExistsSync).toHaveBeenCalledWith("/app/cron/jobs/digest.mjs");
+		expect(mockExistsSync).toHaveBeenCalledWith("/app/generated/cron/jobs/digest.mjs");
 		expect(db.updateRun).toHaveBeenCalledWith(1, "digest");
 		expect(mockRestartCronPm2).toHaveBeenCalledWith({ appRoot: "/app" });
 		expect(result.content).toBe("Cron job digest enabled. Restarted mini-claw-cron.");

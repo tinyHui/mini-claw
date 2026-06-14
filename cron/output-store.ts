@@ -6,8 +6,14 @@ export function getDefaultDatabasePath() {
 	return join(process.cwd(), "miniclaw.db");
 }
 
+export interface CronOutputInput {
+	jobName: string;
+	content: string;
+	channel?: string;
+}
+
 export function publishCronOutput(
-	{ jobName, content, channel = "telegram" },
+	{ jobName, content, channel = "telegram" }: CronOutputInput,
 	dbPath = getDefaultDatabasePath(),
 ) {
 	const sqlite = new Database(dbPath, { fileMustExist: true });

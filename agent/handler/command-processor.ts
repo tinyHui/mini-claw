@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { restartCronPm2 } from "../cron/pm2.js";
+import { getJobScriptPath } from "../../cron/paths.js";
 import { getSqlite } from "../db.js";
 import { logger, withLogContext } from "../logger.js";
 import {
@@ -329,7 +329,7 @@ export class CommandProcessor implements TelegramProcessor {
 	}
 
 	private cronJobScriptExists(context: ProcessorContext, name: string): boolean {
-		return existsSync(join(context.config.cronDir, "jobs", `${name}.mjs`));
+		return existsSync(getJobScriptPath(context.config.cronDir, name));
 	}
 
 	private async setCronEnabledFromCommand(
@@ -356,7 +356,7 @@ export class CommandProcessor implements TelegramProcessor {
 				}
 
 				if (enabled && !this.cronJobScriptExists(context, name)) {
-					return `Cannot enable ${name}: cron/jobs/${name}.mjs was not found.`;
+					return `Cannot enable ${name}: generated/cron/jobs/${name}.mjs was not found.`;
 				}
 
 				getSqlite().prepare("UPDATE cron_jobs SET enabled = ? WHERE name = ?").run(enabled ? 1 : 0, name);

@@ -21,6 +21,7 @@ Thumbs.db
 *.log
 npm-debug.log*
 cron/output/
+generated/cron/*
 
 # Sessions (local data)
 sessions/

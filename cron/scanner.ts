@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, relative, resolve, sep } from "node:path";
 import {
 	extractJobDescription,
 	hasCronSeconds,
@@ -8,9 +8,65 @@ import {
 	validateCapabilitySlug,
 	validateCronExpression,
 	validateJobName,
-} from "./validation.mjs";
+	type ValidationDiagnostic,
+} from "./validation.js";
+import {
+	getCapabilityEntrypointFileName,
+	getCapabilityEntrypointPath,
+	getCapabilityManifestFileName,
+	getCapabilityManifestPath,
+	getCronCapabilitiesDir,
+	getCronJobsDir,
+	getJobScheduleFileName,
+	getJobSchedulePath,
+	getJobScriptFileName,
+	getJobScriptPath,
+} from "./paths.js";
 
-async function pathExists(path) {
+export interface CronJobRegistryRow {
+	name: string;
+	description: string;
+	cronExpression: string;
+	hasSeconds: 0 | 1;
+	scriptPath: string;
+	schedulePath: string;
+	contentHash: string;
+	validatedAt: string;
+}
+
+export interface CronCapabilityRegistryRow {
+	slug: string;
+	name: string;
+	description: string;
+	manifestPath: string;
+	entrypointPath: string;
+	inputSchemaJson: string;
+	outputSchemaJson: string;
+	contentHash: string;
+	validatedAt: string;
+}
+
+export interface CronValidationResult {
+	ok: boolean;
+	counts: {
+		jobs: number;
+		capabilities: number;
+		errors: number;
+		warnings: number;
+	};
+	successes: Array<{ type: "job" | "capability"; name: string; file: string }>;
+	warnings: ValidationDiagnostic[];
+	errors: ValidationDiagnostic[];
+	jobs: CronJobRegistryRow[];
+	capabilities: CronCapabilityRegistryRow[];
+	registry?: {
+		dbPath: string;
+		jobsWritten: number;
+		capabilitiesWritten: number;
+	};
+}
+
+async function pathExists(path: string): Promise<boolean> {
 	try {
 		await stat(path);
 		return true;
@@ -19,11 +75,11 @@ async function pathExists(path) {
 	}
 }
 
-function repoRelative(path) {
+function repoRelative(path: string): string {
 	return relative(process.cwd(), path).split(sep).join("/");
 }
 
-function contentHash(parts) {
+function contentHash(parts: string[]): string {
 	const hash = createHash("sha256");
 	for (const part of parts) {
 		hash.update(part);
@@ -32,15 +88,11 @@ function contentHash(parts) {
 	return hash.digest("hex");
 }
 
-export function getCronJobsDir(cronDir) {
-	return join(cronDir, "jobs");
-}
-
-export async function scanCronJobs(cronDir, validatedAt = new Date().toISOString()) {
+export async function scanCronJobs(cronDir: string, validatedAt = new Date().toISOString()) {
 	const jobsDir = getCronJobsDir(cronDir);
-	const diagnostics = [];
-	const successes = [];
-	const rows = [];
+	const diagnostics: ValidationDiagnostic[] = [];
+	const successes: Array<{ type: "job"; name: string; file: string }> = [];
+	const rows: CronJobRegistryRow[] = [];
 
 	if (!(await pathExists(jobsDir))) {
 		return { rows, diagnostics, successes };
@@ -59,9 +111,9 @@ export async function scanCronJobs(cronDir, validatedAt = new Date().toISOString
 
 	for (const scriptFile of jobScripts) {
 		const name = basename(scriptFile, ".mjs");
-		const scriptPath = resolve(jobsDir, scriptFile);
-		const scheduleFile = `${name}.cron`;
-		const schedulePath = resolve(jobsDir, scheduleFile);
+		const scriptPath = getJobScriptPath(cronDir, name);
+		const scheduleFile = getJobScheduleFileName(name);
+		const schedulePath = getJobSchedulePath(cronDir, name);
 		let hasErrors = false;
 
 		for (const message of validateJobName(name)) {
@@ -102,11 +154,11 @@ export async function scanCronJobs(cronDir, validatedAt = new Date().toISOString
 
 		rows.push({
 			name,
-			description,
+			description: description ?? "",
 			cronExpression,
 			hasSeconds: hasCronSeconds(cronExpression) ? 1 : 0,
-			scriptPath: repoRelative(scriptPath),
-			schedulePath: repoRelative(schedulePath),
+			scriptPath: getJobScriptFileName(name),
+			schedulePath: scheduleFile,
 			contentHash: contentHash([script, cronExpression]),
 			validatedAt,
 		});
@@ -127,11 +179,11 @@ export async function scanCronJobs(cronDir, validatedAt = new Date().toISOString
 	return { rows, diagnostics, successes };
 }
 
-export async function scanCapabilities(cronDir, validatedAt = new Date().toISOString()) {
-	const capabilitiesDir = join(cronDir, "capabilities");
-	const diagnostics = [];
-	const successes = [];
-	const rows = [];
+export async function scanCapabilities(cronDir: string, validatedAt = new Date().toISOString()) {
+	const capabilitiesDir = getCronCapabilitiesDir(cronDir);
+	const diagnostics: ValidationDiagnostic[] = [];
+	const successes: Array<{ type: "capability"; name: string; file: string }> = [];
+	const rows: CronCapabilityRegistryRow[] = [];
 
 	if (!(await pathExists(capabilitiesDir))) {
 		return { rows, diagnostics, successes };
@@ -140,8 +192,8 @@ export async function scanCapabilities(cronDir, validatedAt = new Date().toISOSt
 	const entries = await readdir(capabilitiesDir, { withFileTypes: true });
 	for (const entry of entries.filter((item) => item.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
 		const slug = entry.name;
-		const manifestPath = resolve(capabilitiesDir, slug, "manifest.yaml");
-		const entrypointPath = resolve(capabilitiesDir, slug, "index.mjs");
+		const manifestPath = getCapabilityManifestPath(cronDir, slug);
+		const entrypointPath = getCapabilityEntrypointPath(cronDir, slug);
 		let hasErrors = false;
 
 		for (const message of validateCapabilitySlug(slug)) {
@@ -190,8 +242,8 @@ export async function scanCapabilities(cronDir, validatedAt = new Date().toISOSt
 			slug,
 			name: manifest.name,
 			description: manifest.description,
-			manifestPath: repoRelative(manifestPath),
-			entrypointPath: repoRelative(entrypointPath),
+			manifestPath: getCapabilityManifestFileName(),
+			entrypointPath: getCapabilityEntrypointFileName(),
 			inputSchemaJson: JSON.stringify(manifest.input_schema),
 			outputSchemaJson: JSON.stringify(manifest.output_schema),
 			contentHash: contentHash([manifestContent, entrypointContent]),
@@ -203,7 +255,7 @@ export async function scanCapabilities(cronDir, validatedAt = new Date().toISOSt
 	return { rows, diagnostics, successes };
 }
 
-export async function validateCronRuntime(cronDir) {
+export async function validateCronRuntime(cronDir: string): Promise<CronValidationResult> {
 	const validatedAt = new Date().toISOString();
 	const [jobs, capabilities] = await Promise.all([
 		scanCronJobs(resolve(cronDir), validatedAt),

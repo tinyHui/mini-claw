@@ -115,7 +115,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
 	return {
 		telegramToken: "fake-token",
 		appRoot: "/app",
-		cronDir: "/app/cron",
+		cronDir: "/app/generated/cron",
 		workspace: "/tmp/ws",
 		sessionDir: "/tmp/sessions",
 		logLevel: "debug",
@@ -185,7 +185,7 @@ describe("TelegramChannel", () => {
 		mockRestartCronPm2.mockResolvedValue({
 			ok: true,
 			processName: "mini-claw-cron",
-			command: "pm2 restart mini-claw-cron",
+			command: "pm2 startOrReload ecosystem.config.cjs --only mini-claw-cron --update-env",
 			stdout: "",
 			stderr: "",
 		});

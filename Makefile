@@ -137,8 +137,8 @@ release-package:
 	rm -rf "$$PACKAGE_DIR" "$$ARTIFACT" ; \
 	mkdir -p "$$PACKAGE_DIR/agent/db" ; \
 	cp -R dist "$$PACKAGE_DIR/dist" ; \
-	cp -R cron "$$PACKAGE_DIR/cron" ; \
-	rm -rf "$$PACKAGE_DIR/cron/output" ; \
+	if [ -d generated ]; then cp -R generated "$$PACKAGE_DIR/generated" ; else mkdir -p "$$PACKAGE_DIR/generated/cron/jobs" "$$PACKAGE_DIR/generated/cron/capabilities" ; fi ; \
+	rm -rf "$$PACKAGE_DIR/generated/cron/output" ; \
 	cp -R skills "$$PACKAGE_DIR/skills" ; \
 	cp -R drizzle "$$PACKAGE_DIR/drizzle" ; \
 	rm -f "$$PACKAGE_DIR/drizzle/meta/_journal.json" ; \

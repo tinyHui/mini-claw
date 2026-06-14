@@ -99,7 +99,7 @@ TELEGRAM_USER_ID=123456                    # Single authorized Telegram user ID
 MINI_CLAW_WORKSPACE=/path/to/workspace    # Default: ~/mini-claw-workspace
 MINI_CLAW_SESSION_DIR=~/.mini-claw/sessions
 MINI_CLAW_APP_ROOT=/path/to/mini-claw      # Default: current process cwd
-MINI_CLAW_CRON_DIR=/path/to/mini-claw/cron # Default: $MINI_CLAW_APP_ROOT/cron
+MINI_CLAW_CRON_DIR=/path/to/mini-claw/generated/cron # Default: $MINI_CLAW_APP_ROOT/generated/cron
 PI_THINKING_LEVEL=low                      # low | medium | high
 MINI_CLAW_MEMORY_REVIEW_ENABLED=true       # Periodic self-learning memory review
 MINI_CLAW_MEMORY_REVIEW_INTERVAL_MS=3600000
@@ -205,7 +205,7 @@ systemd starts pm2 on boot, and pm2 manages the Node processes:
 ```bash
 systemctl status pm2-$USER
 pm2 status
-pm2 restart mini-claw mini-claw-cron mini-claw-mailman
+pm2 startOrReload ecosystem.config.cjs --update-env
 pm2 logs mini-claw mini-claw-cron mini-claw-mailman
 ```
 

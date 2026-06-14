@@ -186,7 +186,7 @@ describe("config", () => {
 			expect(config).toEqual({
 				telegramToken: "test-token",
 				appRoot: process.cwd(),
-				cronDir: `${process.cwd()}/cron`,
+				cronDir: `${process.cwd()}/generated/cron`,
 				workspace: "/workspace",
 				sessionDir: "/sessions",
 				logLevel: "debug",
@@ -238,7 +238,7 @@ describe("config", () => {
 			delete process.env.MINI_CLAW_CRON_DIR;
 			const { loadConfig } = await import("./config.js");
 			const config = loadConfig();
-			expect(config.cronDir).toBe("/apps/mini-claw/cron");
+			expect(config.cronDir).toBe("/apps/mini-claw/generated/cron");
 		});
 
 		it("should return cached config on subsequent calls", async () => {

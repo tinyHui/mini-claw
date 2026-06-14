@@ -1,35 +1,30 @@
-import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase } from "../agent/test-database.js";
+import { runGenericCronWorker } from "./generic-runner.js";
 
-const execFileAsync = promisify(execFile);
-const repoRoot = process.cwd();
-const runnerPath = join(repoRoot, "cron", "generic-runner.mjs");
+function cronRoot(root: string): string {
+	return join(root, "generated", "cron");
+}
 
 async function runGenericRunner(root: string, task: string): Promise<{ exitCode: number; stderr: string }> {
 	try {
-		await execFileAsync(process.execPath, [runnerPath, task], {
-			cwd: root,
-			encoding: "utf-8",
-		});
+		await runGenericCronWorker({ task, cronDir: cronRoot(root), dbPath: join(root, "miniclaw.db") });
 		return { exitCode: 0, stderr: "" };
 	} catch (error) {
-		const failed = error as Error & { code?: number; stderr?: string };
 		return {
-			exitCode: typeof failed.code === "number" ? failed.code : 1,
-			stderr: failed.stderr ?? failed.message,
+			exitCode: 1,
+			stderr: error instanceof Error ? error.message : String(error),
 		};
 	}
 }
 
 async function writeJob(root: string, name: string, body: string): Promise<void> {
-	await mkdir(join(root, "cron", "jobs"), { recursive: true });
-	await writeFile(join(root, "cron", "jobs", `${name}.mjs`), body);
+	await mkdir(join(cronRoot(root), "jobs"), { recursive: true });
+	await writeFile(join(cronRoot(root), "jobs", `${name}.mjs`), body);
 }
 
 function readMailbox(root: string): Array<{

@@ -3,18 +3,36 @@ import Database from "better-sqlite3";
 import { stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeCronRegistry } from "./registry.mjs";
-import { getCronJobsDir, validateCronRuntime } from "./scanner.mjs";
-import { logger } from "./logger.mjs";
+import { writeCronRegistry } from "./registry.js";
+import { validateCronRuntime, type CronValidationResult } from "./scanner.js";
+import { logger } from "./logger.js";
+import { getJobScriptPath } from "./paths.js";
 
 const cronRuntimeDir = dirname(fileURLToPath(import.meta.url));
-const genericRunnerPath = resolve(cronRuntimeDir, "generic-runner.mjs");
+const genericRunnerPath = resolve(cronRuntimeDir, "generic-runner.js");
+
+interface CronSchedulerOptions {
+	cronDir: string;
+	dbPath?: string;
+}
+
+interface EnabledCronJobRow {
+	name: string;
+	description: string;
+	cronExpression: string;
+	enabled: number;
+	hasSeconds: number;
+	scriptPath: string;
+	schedulePath: string;
+	contentHash: string;
+	validatedAt: string;
+}
 
 function getDefaultDatabasePath() {
 	return resolve(process.cwd(), "miniclaw.db");
 }
 
-async function pathExists(path) {
+async function pathExists(path: string): Promise<boolean> {
 	try {
 		await stat(path);
 		return true;
@@ -23,7 +41,7 @@ async function pathExists(path) {
 	}
 }
 
-async function readEnabledCronJobs(cronDir, dbPath = getDefaultDatabasePath()) {
+async function readEnabledCronJobs(cronDir: string, dbPath = getDefaultDatabasePath()): Promise<EnabledCronJobRow[]> {
 	const sqlite = new Database(dbPath, { fileMustExist: true });
 	try {
 		const rows = sqlite.prepare(`
@@ -31,12 +49,11 @@ async function readEnabledCronJobs(cronDir, dbPath = getDefaultDatabasePath()) {
 			FROM cron_jobs
 			WHERE enabled = 1
 			ORDER BY name
-		`).all();
-		const jobsDir = getCronJobsDir(cronDir);
-		const enabledRows = [];
+		`).all() as EnabledCronJobRow[];
+		const enabledRows: EnabledCronJobRow[] = [];
 
 		for (const row of rows) {
-			const scriptPath = resolve(jobsDir, `${row.name}.mjs`);
+			const scriptPath = getJobScriptPath(cronDir, row.name);
 			if (await pathExists(scriptPath)) {
 				enabledRows.push(row);
 				continue;
@@ -56,7 +73,7 @@ async function readEnabledCronJobs(cronDir, dbPath = getDefaultDatabasePath()) {
 	}
 }
 
-function logValidationDiagnostics(validation) {
+function logValidationDiagnostics(validation: CronValidationResult): void {
 	for (const diagnostic of [...validation.errors, ...validation.warnings]) {
 		const context = {
 			file: diagnostic.file,
@@ -70,7 +87,7 @@ function logValidationDiagnostics(validation) {
 	}
 }
 
-export async function buildCronScheduler(options) {
+export async function buildCronScheduler(options: CronSchedulerOptions) {
 	const validation = await validateCronRuntime(resolve(options.cronDir));
 	logValidationDiagnostics(validation);
 
@@ -119,7 +136,7 @@ export async function buildCronScheduler(options) {
 	return { bree, jobs, capabilities: validation.capabilities };
 }
 
-export async function startCronScheduler(options) {
+export async function startCronScheduler(options: CronSchedulerOptions) {
 	const built = await buildCronScheduler(options);
 	logger.info("Starting cron scheduler", {
 		operation: "cron_start",
