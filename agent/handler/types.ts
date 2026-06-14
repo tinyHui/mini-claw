@@ -28,8 +28,28 @@ export interface ProcessorResult {
 	content: string;
 }
 
+export type ProgressStepType =
+	| "planning"
+	| "thinking"
+	| "tool"
+	| "shell"
+	| "coding"
+	| "skill"
+	| "review"
+	| "memory"
+	| "command"
+	| "message"
+	| "working";
+
+export interface ProgressStep {
+	type: ProgressStepType;
+	description: string;
+	key?: string;
+}
+
 export interface ProgressReporter {
-	update(content: string | ActivityUpdate): Promise<void>;
+	step(step: ProgressStep): Promise<void>;
+	activity(activity: ActivityUpdate): Promise<void>;
 }
 
 export interface ProcessorContext {

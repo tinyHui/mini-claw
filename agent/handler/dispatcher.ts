@@ -1,4 +1,9 @@
-import type { IncomingTelegramUpdate, TelegramProcessor } from "./types.js";
+import type {
+	IncomingTelegramUpdate,
+	ProcessorContext,
+	ProcessorResult,
+	TelegramProcessor,
+} from "./types.js";
 
 export class TelegramHandlerDispatcher {
 	constructor(private readonly processors: TelegramProcessor[]) {}
@@ -9,6 +14,13 @@ export class TelegramHandlerDispatcher {
 			throw new Error(`No processor registered for ${update.kind}`);
 		}
 		return processor;
+	}
+
+	dispatch(
+		update: IncomingTelegramUpdate,
+		context: ProcessorContext,
+	): Promise<ProcessorResult> {
+		return this.resolve(update).process(update, context);
 	}
 }
 

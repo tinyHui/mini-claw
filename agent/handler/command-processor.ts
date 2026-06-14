@@ -42,6 +42,12 @@ export class CommandProcessor implements TelegramProcessor {
 			throw new Error("CommandProcessor received a non-command update");
 		}
 
+		await context.progress.step({
+			type: "command",
+			description: `Handling /${update.command}`,
+			key: "command:handle",
+		});
+
 		switch (update.command) {
 			case "new":
 				return this.handleNewCommand(update);
@@ -158,6 +164,11 @@ export class CommandProcessor implements TelegramProcessor {
 				chatId,
 			},
 			async () => {
+				await context.progress.step({
+					type: "command",
+					description: "Restarting cron scheduler",
+					key: "cron:restart",
+				});
 				const result = await restartCronPm2({ appRoot: context.config.appRoot });
 				if (result.ok) {
 					logger.info("Restarted cron process via pm2");
@@ -175,17 +186,29 @@ export class CommandProcessor implements TelegramProcessor {
 
 	private async runMemoryReviewFromCommand(context: ProcessorContext): Promise<string> {
 		const log = ["Starting manual memory review."];
-		await context.progress.update(this.formatMemoryRunLog(log));
+		await context.progress.step({
+			type: "memory",
+			description: "Starting manual memory review",
+			key: "memory:start",
+		});
 
 		if (!context.memoryWorker) {
 			log.push("Memory review worker is unavailable.");
-			await context.progress.update(this.formatMemoryRunLog(log));
+			await context.progress.step({
+				type: "memory",
+				description: "Memory review worker unavailable",
+				key: "memory:unavailable",
+			});
 			return this.formatMemoryRunLog(log);
 		}
 
 		const result = await context.memoryWorker.runOnce(async (message) => {
 			log.push(message);
-			await context.progress.update(this.formatMemoryRunLog(log));
+			await context.progress.step({
+				type: this.progressTypeForMemoryMessage(message),
+				description: this.formatMemoryProgressDescription(message),
+				key: this.progressKeyForMemoryMessage(message),
+			});
 		});
 
 		log.push(this.formatMemoryRunResult(result));
@@ -212,6 +235,26 @@ export class CommandProcessor implements TelegramProcessor {
 		if (result.status === "no_messages") return "Completed: no messages needed review.";
 		if (result.status === "disabled") return "Skipped: memory review is disabled.";
 		return "Skipped: another memory review is already running.";
+	}
+
+	private progressTypeForMemoryMessage(message: string) {
+		if (message.startsWith("Reviewing ")) return "review" as const;
+		if (message.startsWith("Marking ")) return "review" as const;
+		return "memory" as const;
+	}
+
+	private progressKeyForMemoryMessage(message: string): string {
+		if (message.startsWith("Preparing ")) return "memory:prepare";
+		if (message.startsWith("Loading ")) return "memory:load";
+		if (message.startsWith("Reviewing ")) return "memory:review";
+		if (message.startsWith("Marking ")) return "memory:mark";
+		if (message.startsWith("No processed ")) return "memory:none";
+		if (message.startsWith("Memory review failed")) return "memory:failed";
+		return `memory:${message}`;
+	}
+
+	private formatMemoryProgressDescription(message: string): string {
+		return message.replace(/\.$/, "");
 	}
 
 	private formatMemoryHelp(): string {
@@ -302,6 +345,11 @@ export class CommandProcessor implements TelegramProcessor {
 				jobName: name,
 			},
 			async () => {
+				await context.progress.step({
+					type: "command",
+					description: `${enabled ? "Enabling" : "Disabling"} cron job ${name}`,
+					key: `cron:${enabled ? "enable" : "disable"}:${name}`,
+				});
 				const job = this.getCronJob(name);
 				if (!job) {
 					return `Cron job not found: ${name}`;
@@ -312,6 +360,11 @@ export class CommandProcessor implements TelegramProcessor {
 				}
 
 				getSqlite().prepare("UPDATE cron_jobs SET enabled = ? WHERE name = ?").run(enabled ? 1 : 0, name);
+				await context.progress.step({
+					type: "command",
+					description: "Restarting cron scheduler",
+					key: "cron:restart",
+				});
 				const result = await restartCronPm2({ appRoot: context.config.appRoot });
 				if (result.ok) {
 					logger.info(enabled ? "Enabled cron job and restarted cron process" : "Disabled cron job and restarted cron process");

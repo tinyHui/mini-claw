@@ -7,10 +7,12 @@ import {
 import type { MemoryReviewWorker } from "../memory/worker.js";
 import type { ActivityUpdate } from "../pi-runner.js";
 import { ensureSession } from "../session-repository.js";
-import { formatActivityStatus } from "./format.js";
+import { ProgressMessageState } from "./format.js";
 import type { TelegramHandlerDispatcher } from "./dispatcher.js";
 import type {
 	IncomingTelegramUpdate,
+	ProgressReporter,
+	ProgressStep,
 	TelegramDeliveryPort,
 } from "./types.js";
 
@@ -27,10 +29,6 @@ function errorMessage(error: unknown): string {
 
 function shouldPersist(update: IncomingTelegramUpdate): boolean {
 	return update.kind === "message";
-}
-
-function initialStatus(): ActivityUpdate {
-	return { type: "working", detail: "", elapsed: 0 };
 }
 
 export async function processTelegramUpdate(
@@ -63,38 +61,29 @@ export async function processTelegramUpdate(
 				}
 
 				const startedAt = Date.now();
-				let lastActivity = initialStatus();
-				let lastActivityUpdate = Date.now();
+				let lastProgressUpdate = Date.now();
+				const progressState = new ProgressMessageState(startedAt);
+				if (update.kind === "message") {
+					progressState.addStep({
+						type: "planning",
+						description: "Planning",
+						key: "pi:planning",
+					});
+				}
 				const ackMsgId = await options.channel.sendAckMessage(
 					update.chatId,
 					sessionId,
-					formatActivityStatus(initialStatus()),
+					progressState.render(startedAt),
 					persist,
 				);
 
-				const updateProgress = async (content: string | ActivityUpdate): Promise<void> => {
+				const flushProgress = async (): Promise<void> => {
 					if (ackMsgId === undefined) return;
 					try {
-						if (typeof content === "string") {
-							await options.channel.updateOrSendMessage(
-								update.chatId,
-								sessionId,
-								content,
-								ackMsgId,
-								"ACK",
-								persist,
-							);
-							return;
-						}
-
-						lastActivity = content;
-						const now = Date.now();
-						if (now - lastActivityUpdate < 2000) return;
-						lastActivityUpdate = now;
 						await options.channel.updateOrSendMessage(
 							update.chatId,
 							sessionId,
-							formatActivityStatus(content),
+							progressState.render(),
 							ackMsgId,
 							"ACK",
 							persist,
@@ -104,17 +93,28 @@ export async function processTelegramUpdate(
 					}
 				};
 
+				const progress: ProgressReporter = {
+					step: async (step: ProgressStep): Promise<void> => {
+						const changed = progressState.addStep(step);
+						if (!changed) return;
+						lastProgressUpdate = Date.now();
+						await flushProgress();
+					},
+					activity: async (activity: ActivityUpdate): Promise<void> => {
+						const changed = progressState.addActivity(activity);
+						const now = Date.now();
+						if (!changed && now - lastProgressUpdate < 2000) return;
+						lastProgressUpdate = now;
+						await flushProgress();
+					},
+				};
+
 				const ackInterval = setInterval(() => {
 					if (ackMsgId === undefined) return;
-					const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-					const tick: ActivityUpdate = {
-						...lastActivity,
-						elapsed,
-					};
 					void options.channel.updateOrSendMessage(
 						update.chatId,
 						sessionId,
-						formatActivityStatus(tick),
+						progressState.render(),
 						ackMsgId,
 						"ACK",
 						persist,
@@ -124,11 +124,10 @@ export async function processTelegramUpdate(
 				}, 5000);
 
 				try {
-					const processor = options.dispatcher.resolve(update);
-					const result = await processor.process(update, {
+					const result = await options.dispatcher.dispatch(update, {
 						config: options.config,
 						sessionId,
-						progress: { update: updateProgress },
+						progress,
 						memoryWorker: options.memoryWorker,
 					});
 

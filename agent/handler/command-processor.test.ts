@@ -97,7 +97,10 @@ function makeContext(overrides: Partial<ProcessorContext> = {}): ProcessorContex
 	return {
 		config: makeConfig(),
 		sessionId: "session-1",
-		progress: { update: vi.fn().mockResolvedValue(undefined) },
+		progress: {
+			step: vi.fn().mockResolvedValue(undefined),
+			activity: vi.fn().mockResolvedValue(undefined),
+		},
 		...overrides,
 	};
 }
@@ -182,7 +185,7 @@ describe("CommandProcessor", () => {
 	});
 
 	it("streams /memory run progress through the shared reporter", async () => {
-		const progressUpdate = vi.fn().mockResolvedValue(undefined);
+		const progressStep = vi.fn().mockResolvedValue(undefined);
 		const runOnce = vi.fn(async (onProgress?: (message: string) => Promise<void> | void) => {
 			await onProgress?.("Preparing workspace memory files.");
 			await onProgress?.("Reviewing 2 processed messages.");
@@ -203,7 +206,10 @@ describe("CommandProcessor", () => {
 			command: "memory",
 			args: ["run"],
 		}, makeContext({
-			progress: { update: progressUpdate },
+			progress: {
+				step: progressStep,
+				activity: vi.fn().mockResolvedValue(undefined),
+			},
 			memoryWorker: {
 				runOnce,
 				stop: vi.fn(),
@@ -212,8 +218,14 @@ describe("CommandProcessor", () => {
 		}));
 
 		expect(runOnce).toHaveBeenCalledOnce();
-		expect(progressUpdate).toHaveBeenCalledWith(expect.stringContaining("Starting manual memory review."));
-		expect(progressUpdate).toHaveBeenCalledWith(expect.stringContaining("Reviewing 2 processed messages."));
+		expect(progressStep).toHaveBeenCalledWith(expect.objectContaining({
+			description: "Starting manual memory review",
+			type: "memory",
+		}));
+		expect(progressStep).toHaveBeenCalledWith(expect.objectContaining({
+			description: "Reviewing 2 processed messages",
+			type: "review",
+		}));
 		expect(result.content).toContain("Applied 1, staged 1, rejected 0.");
 	});
 });

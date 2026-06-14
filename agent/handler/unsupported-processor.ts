@@ -12,11 +12,16 @@ export class UnsupportedProcessor implements TelegramProcessor {
 
 	async process(
 		update: IncomingTelegramUpdate,
-		_context: ProcessorContext,
+		context: ProcessorContext,
 	): Promise<ProcessorResult> {
 		if (update.kind !== "unsupported") {
 			throw new Error("UnsupportedProcessor received a supported update");
 		}
+		await context.progress.step({
+			type: "message",
+			description: "Checking message type",
+			key: "unsupported:check",
+		});
 		return { content: "This message type is not supported yet." };
 	}
 }

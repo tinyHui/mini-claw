@@ -21,13 +21,18 @@ export class MessageProcessor implements TelegramProcessor {
 		}
 
 		const workspace = await getWorkspace(update.chatId);
+		await context.progress.step({
+			type: "planning",
+			description: "Planning",
+			key: "pi:planning",
+		});
 		const result = await runPiWithStreaming(
 			context.config,
 			context.sessionId,
 			update.text,
 			workspace,
 			(activity) => {
-				void context.progress.update(activity);
+				void context.progress.activity(activity);
 			},
 		);
 

@@ -73,11 +73,17 @@ describe("processTelegramUpdate", () => {
 		const processor: TelegramProcessor = {
 			canHandle: () => true,
 			process: vi.fn(async (_update, context) => {
-				await context.progress.update("Halfway");
+				await context.progress.step({
+					type: "message",
+					description: "Halfway",
+					key: "test:halfway",
+				});
 				return { content: "Done" };
 			}),
 		};
-		const dispatcher = { resolve: () => processor } as unknown as TelegramHandlerDispatcher;
+		const dispatcher = {
+			dispatch: (nextUpdate, context) => processor.process(nextUpdate, context),
+		} as TelegramHandlerDispatcher;
 
 		await processTelegramUpdate({
 			kind: "message",
@@ -99,13 +105,13 @@ describe("processTelegramUpdate", () => {
 		expect(channel.sendAckMessage).toHaveBeenCalledWith(
 			"123",
 			"session-1",
-			expect.stringContaining("Working"),
+			expect.stringContaining("|-Planning"),
 			true,
 		);
 		expect(channel.updateOrSendMessage).toHaveBeenCalledWith(
 			"123",
 			"session-1",
-			"Halfway",
+			expect.stringContaining("|-Halfway"),
 			"ack-1",
 			"ACK",
 			true,
@@ -127,7 +133,9 @@ describe("processTelegramUpdate", () => {
 			canHandle: () => true,
 			process: vi.fn(async () => ({ content: "Command result" })),
 		};
-		const dispatcher = { resolve: () => processor } as unknown as TelegramHandlerDispatcher;
+		const dispatcher = {
+			dispatch: (nextUpdate, context) => processor.process(nextUpdate, context),
+		} as TelegramHandlerDispatcher;
 
 		await processTelegramUpdate({
 			kind: "command",
@@ -147,7 +155,7 @@ describe("processTelegramUpdate", () => {
 		expect(channel.sendAckMessage).toHaveBeenCalledWith(
 			"123",
 			"session-1",
-			expect.stringContaining("Working"),
+			expect.stringMatching(/^.+ .+\.\.\. \(0s\)$/),
 			false,
 		);
 		expect(channel.updateOrSendMessage).toHaveBeenLastCalledWith(
