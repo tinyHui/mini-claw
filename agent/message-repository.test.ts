@@ -1,10 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, getDb, initializeDatabase } from "./db.js";
 import { messages } from "./db/schema.js";
 import {
+	getProcessedMessagesForReviewWindow,
 	getUnprocessedUserMessages,
 	insertMessage,
 	markMessageProcessed,
@@ -74,5 +76,84 @@ describe("message-repository", () => {
 		markMessageProcessed(message.id, sessionId);
 
 		expect(getUnprocessedUserMessages(sessionId)).toEqual([]);
+	});
+
+	it("fetches unreviewed processed messages inside the review window", () => {
+		const beforeWindow = insertMessage({
+			id: "before-window",
+			sessionId,
+			role: "user",
+			content: "old",
+			status: "processed",
+			timeStamp: "2026-06-13T02:59:59.000Z",
+		});
+		const inWindow = insertMessage({
+			id: "in-window",
+			sessionId,
+			role: "user",
+			content: "inside",
+			status: "processed",
+			timeStamp: "2026-06-13T03:00:00.000Z",
+		});
+		const laterInWindow = insertMessage({
+			id: "later-in-window",
+			sessionId,
+			role: "assistant",
+			content: "inside later",
+			status: "processed",
+			timeStamp: "2026-06-13T04:00:00.000Z",
+		});
+		insertMessage({
+			id: "pending",
+			sessionId,
+			role: "user",
+			content: "pending",
+			timeStamp: "2026-06-13T04:30:00.000Z",
+		});
+		const reviewed = insertMessage({
+			id: "reviewed",
+			sessionId,
+			role: "user",
+			content: "reviewed",
+			status: "processed",
+			timeStamp: "2026-06-13T05:00:00.000Z",
+		});
+		getDb().update(messages).set({ reviewedAt: "2026-06-13T06:00:00.000Z" }).where(eq(messages.id, reviewed.id)).run();
+
+		const rows = getProcessedMessagesForReviewWindow({
+			start: new Date("2026-06-13T03:00:00.000Z"),
+			end: new Date("2026-06-13T04:30:00.000Z"),
+			limit: 10,
+		});
+
+		expect(rows.map((row) => row.id)).toEqual([inWindow.id, laterInWindow.id]);
+		expect(rows).not.toContain(beforeWindow);
+	});
+
+	it("limits review window messages in timestamp order", () => {
+		const first = insertMessage({
+			id: "first",
+			sessionId,
+			role: "user",
+			content: "first",
+			status: "processed",
+			timeStamp: "2026-06-13T03:00:00.000Z",
+		});
+		insertMessage({
+			id: "second",
+			sessionId,
+			role: "user",
+			content: "second",
+			status: "processed",
+			timeStamp: "2026-06-13T03:01:00.000Z",
+		});
+
+		const rows = getProcessedMessagesForReviewWindow({
+			start: new Date("2026-06-13T03:00:00.000Z"),
+			end: new Date("2026-06-13T04:00:00.000Z"),
+			limit: 1,
+		});
+
+		expect(rows.map((row) => row.id)).toEqual([first.id]);
 	});
 });

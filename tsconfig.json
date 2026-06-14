@@ -11,6 +11,9 @@
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
+		"paths": {
+			"#memory/*": ["./agent/memory/*"]
+		},
 		"declaration": true,
 		"declarationMap": true,
 		"sourceMap": true

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, relative, resolve, sep } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import {
 	extractJobDescription,
 	hasCronSeconds,
@@ -11,12 +11,16 @@ import {
 	type ValidationDiagnostic,
 } from "./validation.js";
 import {
+	APP_CRON_JOBS_DIR,
 	getCapabilityEntrypointFileName,
 	getCapabilityEntrypointPath,
 	getCapabilityManifestFileName,
 	getCapabilityManifestPath,
+	getDefaultAppCronJobsDir,
 	getCronCapabilitiesDir,
 	getCronJobsDir,
+	getAppJobRuntimeFileName,
+	getAppJobScheduleFileName,
 	getJobScheduleFileName,
 	getJobSchedulePath,
 	getJobScriptFileName,
@@ -88,8 +92,18 @@ function contentHash(parts: string[]): string {
 	return hash.digest("hex");
 }
 
-export async function scanCronJobs(cronDir: string, validatedAt = new Date().toISOString()) {
-	const jobsDir = getCronJobsDir(cronDir);
+interface JobDirScanOptions {
+	jobsDir: string;
+	scriptExtension: ".mjs" | ".ts";
+	scriptPathForName(name: string): string;
+	schedulePathForName(name: string): string;
+	scriptRegistryPathForName(name: string): string;
+	scheduleRegistryPathForName(name: string): string;
+	validatedAt: string;
+}
+
+async function scanJobDirectory(options: JobDirScanOptions) {
+	const jobsDir = options.jobsDir;
 	const diagnostics: ValidationDiagnostic[] = [];
 	const successes: Array<{ type: "job"; name: string; file: string }> = [];
 	const rows: CronJobRegistryRow[] = [];
@@ -100,7 +114,7 @@ export async function scanCronJobs(cronDir: string, validatedAt = new Date().toI
 
 	const entries = await readdir(jobsDir, { withFileTypes: true });
 	const jobScripts = entries
-		.filter((entry) => entry.isFile() && entry.name.endsWith(".mjs"))
+		.filter((entry) => entry.isFile() && entry.name.endsWith(options.scriptExtension))
 		.map((entry) => entry.name)
 		.sort();
 	const cronFiles = new Set(
@@ -110,10 +124,10 @@ export async function scanCronJobs(cronDir: string, validatedAt = new Date().toI
 	);
 
 	for (const scriptFile of jobScripts) {
-		const name = basename(scriptFile, ".mjs");
-		const scriptPath = getJobScriptPath(cronDir, name);
-		const scheduleFile = getJobScheduleFileName(name);
-		const schedulePath = getJobSchedulePath(cronDir, name);
+		const name = basename(scriptFile, options.scriptExtension);
+		const scriptPath = options.scriptPathForName(name);
+		const scheduleFile = getAppJobScheduleFileName(name);
+		const schedulePath = options.schedulePathForName(name);
 		let hasErrors = false;
 
 		for (const message of validateJobName(name)) {
@@ -157,26 +171,80 @@ export async function scanCronJobs(cronDir: string, validatedAt = new Date().toI
 			description: description ?? "",
 			cronExpression,
 			hasSeconds: hasCronSeconds(cronExpression) ? 1 : 0,
-			scriptPath: getJobScriptFileName(name),
-			schedulePath: scheduleFile,
+			scriptPath: options.scriptRegistryPathForName(name),
+			schedulePath: options.scheduleRegistryPathForName(name),
 			contentHash: contentHash([script, cronExpression]),
-			validatedAt,
+			validatedAt: options.validatedAt,
 		});
 		successes.push({ type: "job", name, file: repoRelative(scriptPath) });
 	}
 
 	for (const cronFile of cronFiles) {
 		const name = basename(cronFile, ".cron");
-		if (!jobScripts.includes(`${name}.mjs`)) {
+		if (!jobScripts.includes(`${name}${options.scriptExtension}`)) {
 			diagnostics.push({
 				level: "warn",
 				file: resolve(jobsDir, cronFile),
-				message: `Schedule file ${cronFile} has no matching ${name}.mjs job.`,
+				message: `Schedule file ${cronFile} has no matching ${name}${options.scriptExtension} job.`,
 			});
 		}
 	}
 
 	return { rows, diagnostics, successes };
+}
+
+function duplicateJobDiagnostics(rows: CronJobRegistryRow[]): ValidationDiagnostic[] {
+	const seen = new Map<string, string>();
+	const diagnostics: ValidationDiagnostic[] = [];
+	for (const row of rows) {
+		const firstPath = seen.get(row.name);
+		if (!firstPath) {
+			seen.set(row.name, row.scriptPath);
+			continue;
+		}
+		diagnostics.push({
+			level: "error",
+			file: row.scriptPath,
+			message: `Duplicate cron job name "${row.name}" also found at ${firstPath}.`,
+		});
+	}
+	return diagnostics;
+}
+
+export async function scanCronJobs(
+	cronDir: string,
+	validatedAt = new Date().toISOString(),
+	appJobsDir = getDefaultAppCronJobsDir(),
+) {
+	const generated = await scanJobDirectory({
+		jobsDir: getCronJobsDir(cronDir),
+		scriptExtension: ".mjs",
+		scriptPathForName: (name) => getJobScriptPath(cronDir, name),
+		schedulePathForName: (name) => getJobSchedulePath(cronDir, name),
+		scriptRegistryPathForName: (name) => getJobScriptFileName(name),
+		scheduleRegistryPathForName: (name) => getJobScheduleFileName(name),
+		validatedAt,
+	});
+	const bundled = await scanJobDirectory({
+		jobsDir: appJobsDir,
+		scriptExtension: ".ts",
+		scriptPathForName: (name) => join(appJobsDir, `${name}.ts`),
+		schedulePathForName: (name) => join(appJobsDir, `${name}.cron`),
+		scriptRegistryPathForName: (name) => join(APP_CRON_JOBS_DIR, getAppJobRuntimeFileName(name)),
+		scheduleRegistryPathForName: (name) => join(APP_CRON_JOBS_DIR, getAppJobScheduleFileName(name)),
+		validatedAt,
+	});
+	const rows = [...generated.rows, ...bundled.rows];
+	const duplicateDiagnostics = duplicateJobDiagnostics(rows);
+	const duplicateNames = new Set(
+		duplicateDiagnostics.map((diagnostic) => diagnostic.message.match(/"([^"]+)"/)?.[1]).filter(Boolean),
+	);
+
+	return {
+		rows: rows.filter((row) => !duplicateNames.has(row.name)),
+		diagnostics: [...generated.diagnostics, ...bundled.diagnostics, ...duplicateDiagnostics],
+		successes: [...generated.successes, ...bundled.successes].filter((success) => !duplicateNames.has(success.name)),
+	};
 }
 
 export async function scanCapabilities(cronDir: string, validatedAt = new Date().toISOString()) {
@@ -255,10 +323,13 @@ export async function scanCapabilities(cronDir: string, validatedAt = new Date()
 	return { rows, diagnostics, successes };
 }
 
-export async function validateCronRuntime(cronDir: string): Promise<CronValidationResult> {
+export async function validateCronRuntime(
+	cronDir: string,
+	appJobsDir = getDefaultAppCronJobsDir(),
+): Promise<CronValidationResult> {
 	const validatedAt = new Date().toISOString();
 	const [jobs, capabilities] = await Promise.all([
-		scanCronJobs(resolve(cronDir), validatedAt),
+		scanCronJobs(resolve(cronDir), validatedAt, appJobsDir),
 		scanCapabilities(resolve(cronDir), validatedAt),
 	]);
 	const diagnostics = [...jobs.diagnostics, ...capabilities.diagnostics];

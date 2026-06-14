@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/agent/index.js",
   "imports": {
-    "#cron/*": "./generated/cron/*"
+    "#cron/*": "./generated/cron/*",
+    "#memory/*": "./dist/agent/memory/*"
   },
   "scripts": {
     "pi": "pi",

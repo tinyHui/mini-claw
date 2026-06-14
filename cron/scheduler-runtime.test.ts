@@ -20,6 +20,15 @@ async function writeScheduledJob(root: string, name: string): Promise<void> {
 	await writeFile(join(cronRoot(root), "jobs", `${name}.cron`), "0 8 * * *\n");
 }
 
+async function writeBundledJob(root: string, name: string): Promise<void> {
+	await mkdir(join(root, "cron", "jobs"), { recursive: true });
+	await writeFile(
+		join(root, "cron", "jobs", `${name}.ts`),
+		`// description: ${name} bundled job\nexport async function run() {}\n`,
+	);
+	await writeFile(join(root, "cron", "jobs", `${name}.cron`), "55 2 * * *\n");
+}
+
 function insertCronJob(root: string, name: string, enabled = 1): void {
 	const sqlite = new Database(join(root, "miniclaw.db"));
 	sqlite.prepare(`
@@ -59,6 +68,7 @@ describe("cron scheduler runtime", () => {
 		const built = await buildCronScheduler({
 			cronDir: cronRoot(root),
 			dbPath: join(root, "miniclaw.db"),
+			appRoot: root,
 		});
 
 		expect(built.bree.config.jobs).toEqual([
@@ -71,6 +81,8 @@ describe("cron scheduler runtime", () => {
 					workerData: {
 						task: "digest",
 						cronDir: cronRoot(root),
+						modulePath: join(cronRoot(root), "jobs", "digest.mjs"),
+						allowNoOutput: false,
 					},
 				},
 			}),
@@ -85,6 +97,7 @@ describe("cron scheduler runtime", () => {
 		const built = await buildCronScheduler({
 			cronDir: cronRoot(root),
 			dbPath: join(root, "miniclaw.db"),
+			appRoot: root,
 		});
 
 		expect(built.bree.config.jobs).toEqual([]);
@@ -98,6 +111,7 @@ describe("cron scheduler runtime", () => {
 		const built = await buildCronScheduler({
 			cronDir: cronRoot(root),
 			dbPath: join(root, "miniclaw.db"),
+			appRoot: root,
 		});
 
 		const sqlite = new Database(join(root, "miniclaw.db"));
@@ -106,5 +120,32 @@ describe("cron scheduler runtime", () => {
 
 		expect(built.bree.config.jobs).toEqual([]);
 		expect(row).toBeUndefined();
+	});
+
+	it("registers bundled app jobs from cron/jobs", async () => {
+		await writeBundledJob(root, "memory_review");
+		const { buildCronScheduler } = await import("./scheduler-runtime.js");
+
+		const built = await buildCronScheduler({
+			cronDir: cronRoot(root),
+			dbPath: join(root, "miniclaw.db"),
+			appRoot: root,
+		});
+
+		expect(built.bree.config.jobs).toEqual([
+			expect.objectContaining({
+				name: "memory_review",
+				cron: "55 2 * * *",
+				hasSeconds: false,
+				worker: {
+					workerData: {
+						task: "memory_review",
+						cronDir: cronRoot(root),
+						modulePath: join(root, "cron", "jobs", "memory_review.ts"),
+						allowNoOutput: true,
+					},
+				},
+			}),
+		]);
 	});
 });

@@ -20,7 +20,7 @@ logger.info("Initializing cron scheduler", {
 	logLevel,
 });
 
-const scheduler = await startCronScheduler({ cronDir });
+const scheduler = await startCronScheduler({ cronDir, appRoot });
 
 logger.info("Cron scheduler ready", {
 	operation: "cron_ready",

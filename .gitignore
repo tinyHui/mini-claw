@@ -41,6 +41,7 @@ miniclaw.db-wal
 
 cron/**/*.yaml
 cron/**/*.cron
+!cron/jobs/*.cron
 cron/**/*.mjs
 !cron/*.mjs
 drizzle/meta/_journal.json

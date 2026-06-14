@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { extname, resolve } from "node:path";
 import { restartCronPm2 } from "../cron/pm2.js";
 import { getJobScriptPath } from "../../cron/paths.js";
 import { getSqlite } from "../db.js";
@@ -27,6 +28,7 @@ interface CronCommandJobRow {
 
 interface CronCommandJobLookupRow extends CronCommandJobRow {
 	description: string;
+	scriptPath: string;
 }
 
 export class CommandProcessor implements TelegramProcessor {
@@ -322,14 +324,22 @@ export class CommandProcessor implements TelegramProcessor {
 
 	private getCronJob(name: string): CronCommandJobLookupRow | undefined {
 		return getSqlite().prepare(`
-			SELECT name, description, cronExpression, enabled
+			SELECT name, description, cronExpression, enabled, scriptPath
 			FROM cron_jobs
 			WHERE name = ?
 		`).get(name) as CronCommandJobLookupRow | undefined;
 	}
 
-	private cronJobScriptExists(context: ProcessorContext, name: string): boolean {
-		return existsSync(getJobScriptPath(context.config.cronDir, name));
+	private cronJobScriptExists(context: ProcessorContext, job: CronCommandJobLookupRow): boolean {
+		if (!job.scriptPath || job.scriptPath === `${job.name}.mjs`) {
+			return existsSync(getJobScriptPath(context.config.cronDir, job.name));
+		}
+		const appPath = resolve(context.config.appRoot, job.scriptPath);
+		if (existsSync(appPath)) return true;
+		if (extname(appPath) === ".js") {
+			return existsSync(appPath.slice(0, -".js".length) + ".ts");
+		}
+		return false;
 	}
 
 	private async setCronEnabledFromCommand(
@@ -355,8 +365,8 @@ export class CommandProcessor implements TelegramProcessor {
 					return `Cron job not found: ${name}`;
 				}
 
-				if (enabled && !this.cronJobScriptExists(context, name)) {
-					return `Cannot enable ${name}: generated/cron/jobs/${name}.mjs was not found.`;
+				if (enabled && !this.cronJobScriptExists(context, job)) {
+					return `Cannot enable ${name}: ${job.scriptPath} was not found.`;
 				}
 
 				getSqlite().prepare("UPDATE cron_jobs SET enabled = ? WHERE name = ?").run(enabled ? 1 : 0, name);

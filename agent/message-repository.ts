@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lte } from "drizzle-orm";
 import { getDb } from "./db.js";
 import { messages, type MessageRow } from "./db/schema.js";
 
@@ -116,9 +116,31 @@ export function getProcessedMessagesForReview(limit: number): Message[] {
 	return db
 		.select()
 		.from(messages)
-		.where(and(eq(messages.status, "processed"), ne(messages.status, "ACK"), isNull(messages.reviewedAt)))
+		.where(and(eq(messages.status, "processed"), isNull(messages.reviewedAt)))
 		.orderBy(asc(messages.timeStamp))
 		.limit(limit)
+		.all() as Message[];
+}
+
+export function getProcessedMessagesForReviewWindow(input: {
+	start: Date;
+	end: Date;
+	limit: number;
+}): Message[] {
+	const db = getDb();
+	return db
+		.select()
+		.from(messages)
+		.where(
+			and(
+				eq(messages.status, "processed"),
+				isNull(messages.reviewedAt),
+				gte(messages.timeStamp, input.start.toISOString()),
+				lte(messages.timeStamp, input.end.toISOString()),
+			),
+		)
+		.orderBy(asc(messages.timeStamp))
+		.limit(input.limit)
 		.all() as Message[];
 }
 

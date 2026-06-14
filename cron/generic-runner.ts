@@ -13,25 +13,32 @@ interface CronTaskInput {
 	task: string;
 	cronDir?: string;
 	dbPath?: string;
+	modulePath?: string;
+	allowNoOutput?: boolean;
 }
 
 export async function executeCronTask({
 	task,
 	cronDir = getDefaultGeneratedCronDir(),
 	dbPath,
+	modulePath,
+	allowNoOutput = false,
 }: CronTaskInput) {
 	const nameErrors = validateJobName(task);
 	if (nameErrors.length > 0) {
 		throw new Error(`Invalid cron task "${task}": ${nameErrors.join(" ")}`);
 	}
 
-	const modulePath = getJobScriptPath(cronDir, task);
-	const imported = await import(pathToFileURL(modulePath).href);
+	const resolvedModulePath = modulePath ?? getJobScriptPath(cronDir, task);
+	const imported = await import(pathToFileURL(resolvedModulePath).href);
 	if (typeof imported.run !== "function") {
 		throw new Error(`Cron task "${task}" must export async function run().`);
 	}
 
 	const result = await imported.run();
+	if (result === undefined && allowNoOutput) {
+		return undefined;
+	}
 	if (typeof result !== "string") {
 		throw new Error(`Cron task "${task}" run() must return a string.`);
 	}
@@ -52,12 +59,21 @@ export async function runGenericCronWorker(data = workerData as Partial<CronTask
 			task,
 			cronDir,
 			dbPath,
+			modulePath: data?.modulePath,
+			allowNoOutput: data?.allowNoOutput,
 		});
-		logger.info("Cron task output persisted", {
-			operation: "cron_task_output_persisted",
-			jobName: task,
-			outputId: row.id,
-		});
+		if (row) {
+			logger.info("Cron task output persisted", {
+				operation: "cron_task_output_persisted",
+				jobName: task,
+				outputId: row.id,
+			});
+		} else {
+			logger.info("Cron task completed without output", {
+				operation: "cron_task_completed_silent",
+				jobName: task,
+			});
+		}
 		return row;
 	} catch (error) {
 		const message = errorMessage(error);

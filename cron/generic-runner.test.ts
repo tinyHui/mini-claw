@@ -112,4 +112,17 @@ describe("generic cron runner", () => {
 			},
 		]);
 	});
+
+	it("allows explicit silent success without publishing output", async () => {
+		await writeJob(root, "silent", "export async function run() {}\n");
+
+		await runGenericCronWorker({
+			task: "silent",
+			cronDir: cronRoot(root),
+			dbPath: join(root, "miniclaw.db"),
+			allowNoOutput: true,
+		});
+
+		expect(readMailbox(root)).toEqual([]);
+	});
 });

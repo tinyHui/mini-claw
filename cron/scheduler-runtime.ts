@@ -1,12 +1,12 @@
 import Bree from "bree";
 import Database from "better-sqlite3";
 import { stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeCronRegistry } from "./registry.js";
 import { validateCronRuntime, type CronValidationResult } from "./scanner.js";
 import { logger } from "./logger.js";
-import { getJobScriptPath } from "./paths.js";
+import { getDefaultAppCronJobsDir, getJobScriptPath } from "./paths.js";
 
 const cronRuntimeDir = dirname(fileURLToPath(import.meta.url));
 const genericRunnerPath = resolve(cronRuntimeDir, "generic-runner.js");
@@ -14,6 +14,7 @@ const genericRunnerPath = resolve(cronRuntimeDir, "generic-runner.js");
 interface CronSchedulerOptions {
 	cronDir: string;
 	dbPath?: string;
+	appRoot?: string;
 }
 
 interface EnabledCronJobRow {
@@ -41,7 +42,34 @@ async function pathExists(path: string): Promise<boolean> {
 	}
 }
 
-async function readEnabledCronJobs(cronDir: string, dbPath = getDefaultDatabasePath()): Promise<EnabledCronJobRow[]> {
+async function resolveJobModulePath(job: Pick<EnabledCronJobRow, "name" | "scriptPath">, cronDir: string, appRoot: string): Promise<string | undefined> {
+	const generatedPath = getJobScriptPath(cronDir, job.name);
+	if (job.scriptPath === `${job.name}.mjs` && await pathExists(generatedPath)) {
+		return generatedPath;
+	}
+
+	const appPath = resolve(appRoot, job.scriptPath);
+	if (await pathExists(appPath)) {
+		return appPath;
+	}
+
+	if (extname(appPath) === ".js") {
+		const sourcePath = appPath.slice(0, -".js".length) + ".ts";
+		if (await pathExists(sourcePath)) return sourcePath;
+	}
+
+	return undefined;
+}
+
+function allowsNoOutput(job: Pick<EnabledCronJobRow, "scriptPath">): boolean {
+	return job.scriptPath.startsWith("cron/jobs/");
+}
+
+async function readEnabledCronJobs(
+	cronDir: string,
+	dbPath = getDefaultDatabasePath(),
+	appRoot = process.cwd(),
+): Promise<Array<EnabledCronJobRow & { modulePath: string; allowNoOutput: boolean }>> {
 	const sqlite = new Database(dbPath, { fileMustExist: true });
 	try {
 		const rows = sqlite.prepare(`
@@ -50,12 +78,16 @@ async function readEnabledCronJobs(cronDir: string, dbPath = getDefaultDatabaseP
 			WHERE enabled = 1
 			ORDER BY name
 		`).all() as EnabledCronJobRow[];
-		const enabledRows: EnabledCronJobRow[] = [];
+		const enabledRows: Array<EnabledCronJobRow & { modulePath: string; allowNoOutput: boolean }> = [];
 
 		for (const row of rows) {
-			const scriptPath = getJobScriptPath(cronDir, row.name);
-			if (await pathExists(scriptPath)) {
-				enabledRows.push(row);
+			const modulePath = await resolveJobModulePath(row, cronDir, appRoot);
+			if (modulePath) {
+				enabledRows.push({
+					...row,
+					modulePath,
+					allowNoOutput: allowsNoOutput(row),
+				});
 				continue;
 			}
 
@@ -63,7 +95,7 @@ async function readEnabledCronJobs(cronDir: string, dbPath = getDefaultDatabaseP
 			logger.warn("Deleted cron job registry row because its script file is missing", {
 				operation: "cron_job_deleted_missing_file",
 				jobName: row.name,
-				file: scriptPath,
+				file: row.scriptPath,
 			});
 		}
 
@@ -88,7 +120,8 @@ function logValidationDiagnostics(validation: CronValidationResult): void {
 }
 
 export async function buildCronScheduler(options: CronSchedulerOptions) {
-	const validation = await validateCronRuntime(resolve(options.cronDir));
+	const appRoot = options.appRoot ?? process.cwd();
+	const validation = await validateCronRuntime(resolve(options.cronDir), getDefaultAppCronJobsDir(appRoot));
 	logValidationDiagnostics(validation);
 
 	logger.info("Cron file validation completed", {
@@ -105,7 +138,7 @@ export async function buildCronScheduler(options: CronSchedulerOptions) {
 	}
 
 	const registry = writeCronRegistry(validation, options.dbPath);
-	const jobs = await readEnabledCronJobs(options.cronDir, options.dbPath);
+	const jobs = await readEnabledCronJobs(options.cronDir, options.dbPath, appRoot);
 
 	logger.info("Cron scheduler scan completed", {
 		operation: "cron_scan",
@@ -128,6 +161,8 @@ export async function buildCronScheduler(options: CronSchedulerOptions) {
 				workerData: {
 					task: job.name,
 					cronDir: options.cronDir,
+					modulePath: job.modulePath,
+					allowNoOutput: job.allowNoOutput,
 				},
 			},
 		})),
