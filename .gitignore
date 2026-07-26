@@ -1,49 +1,24 @@
-# Dependencies
-node_modules/
-.pnpm-store/
-
-# Build output
-dist/
-
-# Environment
+# Secrets and local configuration
 .env
 .env.local
+.env.*.local
 
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-npm-debug.log*
-cron/output/
-generated/cron/*
-
-# Sessions (local data)
-sessions/
-
-# Coverage
+# Dependencies and build output
+node_modules/
+dist/
 coverage/
+.pnpm-store/
 
+# Pi-managed project package installs
+.pi/git/
+.pi/npm/
 
-# Agent related files
-.workspace/
-.sessions/
-miniclaw.db
-miniclaw.db*
-miniclaw.db-shm
-miniclaw.db-wal
+# Logs and temporary output
+*.log
 *.tar.gz
 
-cron/**/*.yaml
-cron/**/*.cron
-!cron/jobs/*.cron
-cron/**/*.mjs
-!cron/*.mjs
-
-# reference project
-hermes-agent/
+# Editor and OS state
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
