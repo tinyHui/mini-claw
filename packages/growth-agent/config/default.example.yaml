@@ -1,0 +1,36 @@
+version: 1
+timezone: Europe/London
+dailyReport:
+  hour: 7
+  minute: 0
+  missedRunHours: 6
+paths:
+  state: /var/lib/growth-agent/state
+  artifacts: /var/lib/growth-agent/artifacts
+  workspace: /srv/mini-claw/app
+limits:
+  maxConcurrentHeavyJobs: 1
+  approvalMinutes: 15
+  dailyWritesPerPlatform: 1
+  diskWarnPercent: 20
+  diskBlockHeavyPercent: 15
+  diskCriticalPercent: 10
+  thermalPauseCelsius: 75
+connectors:
+  reddit: draft
+  x: draft
+  rednote: draft
+  dryRunUntil: null
+sources:
+  hackernews:
+    enabled: true
+    maxItems: 40
+  arxiv:
+    enabled: true
+    maxItems: 20
+  youtube:
+    enabled: false
+    maxItems: 15
+  github:
+    enabled: false
+    maxItems: 25

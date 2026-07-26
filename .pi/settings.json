@@ -1,3 +1,9 @@
 {
-  "packages": []
+  "packages": [
+    "npm:@llblab/pi-telegram@0.24.11",
+    "npm:pi-schedule-prompt@0.4.1",
+    "npm:@nqbao/pi-sandbox@0.1.3",
+    "npm:pi-scraper@0.13.1",
+    "npm:pi-mcp-adapter@2.15.0"
+  ]
 }

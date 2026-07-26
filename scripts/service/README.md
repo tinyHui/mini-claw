@@ -1,7 +1,7 @@
 # System Service Utilities
 
-This directory is reserved for the future Linux systemd user-service tooling
-for the personal bot.
+This directory contains Linux systemd user-service tooling for the dedicated
+`growth-agent` account.
 
 The eventual interface must cover:
 
@@ -11,5 +11,6 @@ The eventual interface must cover:
 - idempotent upgrades;
 - preservation of credentials, sessions, and user data.
 
-No unit file, installer, privileged command, or service entry point is provided
-in the placeholder phase.
+`install.sh` deploys an already-built pnpm package. It does not install host or
+npm dependencies and never imports repository secrets. `uninstall.sh` preserves
+all state in `/var/lib/growth-agent`.

@@ -1,30 +1,28 @@
 # Mini-Claw Workspace
 
-This repository is a clean workspace for building a personal daily-use bot on
-top of Pi. Pi supplies the CLI, agent core, sessions, and SDK. This workspace
-supplies project guidance, local Pi resources, reusable Pi packages, and the
-operational tooling needed to run the eventual bot.
+This repository contains Mini-Claw, a Pi-native local growth agent for a
+single owner. Pi supplies the model/provider integration, agent loop, sessions,
+and core tools. This workspace supplies the durable application policy,
+Telegram control surface, research/report pipeline, publishing approval gate,
+project-local Pi resources, and Raspberry Pi service tooling.
 
-The repository is intentionally only a scaffold. It does not currently contain
-a bot runtime, installed Pi packages, working extensions, service units, or
-setup automation.
+The production target is a 64-bit Raspberry Pi 4 with 4 GB RAM and a
+high-endurance microSD card. The Mac remains the development and administration
+client.
 
 ## Structure
 
 ```text
-.pi/
-  settings.json       Empty project-local Pi package configuration
-  extensions/         Workspace-local Pi extensions
-  skills/             Workspace-local agent skills
-  prompts/            Workspace-local prompt templates
-  themes/             Workspace-local themes
-packages/             Future reusable or installable Pi packages
+.pi/                  Workspace-local Pi extensions, skills, and prompts
+packages/
+  growth-agent/       TypeScript daemon and application policy
 scripts/
-  dev/                Future development environment utilities
-  service/            Future systemd user-service utilities
+  dev/                Read-only host/package diagnostics
+  service/            systemd user-service lifecycle tooling
 docs/
-  architecture.md     Ownership and architecture boundaries
-  guidance/           Design research retained for future work
+  architecture.md     Runtime boundaries and data flow
+  product/            Product requirements and target decisions
+  runbooks/           Installation and operations
 AGENTS.md              Instructions loaded by Pi and other coding agents
 ```
 
@@ -33,19 +31,23 @@ Pi calls distributable bundles of extensions, skills, prompts, and themes
 personal bot workspace, while `packages/` is reserved for independently
 packaged components.
 
-## Current Commands
+## Commands
 
 ```bash
 make help
+make dev
 make check
+make build
+make test
+make service-install
+make service-start
+make service-status
+make service-logs
 ```
 
-`make check` validates only the scaffold. It does not install dependencies,
-download packages, authenticate Pi, or start a service.
+`make dev` runs the daemon in the foreground with a safe local configuration
+and restarts it when TypeScript files change. Telegram and research sources stay
+disabled unless explicitly configured in the environment/local configuration.
 
-## Next Phase
-
-Runtime dependencies, package sources, extension implementations, and service
-entry points should be selected only when bot implementation begins. Do not
-restore the previous custom Telegram, SQLite, cron, or agent-loop architecture
-as a starting point.
+Service installation is explicit and privileged. It never imports `.env`
+automatically, and uninstall preserves `/var/lib/growth-agent`.

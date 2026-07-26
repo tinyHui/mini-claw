@@ -1,6 +1,12 @@
 {
   "name": "mini-claw-workspace",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Dependency-free scaffold for a personal bot workspace built on Pi"
+  "description": "Pi-native local growth agent workspace",
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "build": "pnpm --filter @mini-claw/growth-agent build",
+    "check": "pnpm --filter @mini-claw/growth-agent check",
+    "test": "pnpm --filter @mini-claw/growth-agent test"
+  }
 }

@@ -16,6 +16,20 @@ coverage/
 # Logs and temporary output
 *.log
 *.tar.gz
+artifacts/
+state/
+.runtime/
+*.db
+*.db-shm
+*.db-wal
+
+# Local runtime and connector state
+.pi/auth.json
+.pi/telegram.json
+.pi/runtime/
+config/local.yaml
+config/dev.yaml
+config/secrets.env
 
 # Editor and OS state
 .vscode/

@@ -1,0 +1,24 @@
+[Unit]
+Description=Mini-Claw Pi Growth Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/mini-claw/app
+Environment=MINI_CLAW_CONFIG=%h/config/local.yaml
+EnvironmentFile=%h/config/secrets.env
+ExecStart=/usr/bin/node --max-old-space-size=1024 /srv/mini-claw/app/dist/daemon.js
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryHigh=1280M
+MemoryMax=1536M
+TasksMax=256
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

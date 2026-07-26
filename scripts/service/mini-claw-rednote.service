@@ -1,0 +1,19 @@
+[Unit]
+Description=Mini-Claw on-demand Rednote connector
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/config/rednote.env
+ExecStart=/usr/bin/podman run --rm --name mini-claw-rednote --pull=never -p 127.0.0.1:18060:18060 -v %h/rednote/data:/app/data:Z -v %h/rednote/images:/app/images:Z ${REDNOTE_IMAGE}
+ExecStop=/usr/bin/podman stop --time 10 mini-claw-rednote
+Restart=no
+UMask=0077
+NoNewPrivileges=true
+MemoryHigh=1280M
+MemoryMax=1536M
+TasksMax=256
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
